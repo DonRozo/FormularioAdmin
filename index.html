@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DATA-PAC | Administradores OAP</title>
+
+  <link rel="stylesheet" href="style.css" />
+</head>
+
+<body>
+  <div class="app">
+    <!-- Header estilo “reporte” -->
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand__dot"></div>
+        <div class="brand__text">
+          <div class="brand__title">DATA-PAC</div>
+          <div class="brand__subtitle">Administración OAP • Catálogos, Estructura y Seguridad</div>
+        </div>
+      </div>
+
+      <div class="topbar__right">
+        <div class="pill" id="pill-service">Servicio: DATAPAC_V1</div>
+        <button class="btn btn--ghost" id="btn-reload">Recargar</button>
+      </div>
+    </header>
+
+    <!-- Layout 2 columnas real -->
+    <main class="layout layout--admin2">
+      <!-- Menú izquierdo -->
+      <aside class="panel panel--nav2" aria-label="Menú">
+        <div class="panel__header">
+          <h2>Tablas</h2>
+          <p class="muted">Selecciona una tabla para administrar su información.</p>
+        </div>
+
+        <div class="navlist" id="navlist">
+          <!-- Se llena por HTML estático (botones) -->
+          <button class="navitem is-active" data-entity="CFG_PAC">
+            <span class="navitem__title" data-label="CFG_PAC">PAC</span>
+            <span class="navitem__meta">Estructura</span>
+          </button>
+
+          <div class="navgroup">Estructura PAC</div>
+          <button class="navitem" data-entity="CFG_Linea">
+            <span class="navitem__title" data-label="CFG_Linea">Líneas</span>
+            <span class="navitem__meta">Estructura</span>
+          </button>
+          <button class="navitem" data-entity="CFG_Programa">
+            <span class="navitem__title" data-label="CFG_Programa">Programas</span>
+            <span class="navitem__meta">Estructura</span>
+          </button>
+          <button class="navitem" data-entity="CFG_Proyecto">
+            <span class="navitem__title" data-label="CFG_Proyecto">Proyectos</span>
+            <span class="navitem__meta">Estructura</span>
+          </button>
+          <button class="navitem" data-entity="CFG_Objetivo">
+            <span class="navitem__title" data-label="CFG_Objetivo">Objetivos</span>
+            <span class="navitem__meta">Estructura</span>
+          </button>
+          <button class="navitem" data-entity="CFG_Actividad">
+            <span class="navitem__title" data-label="CFG_Actividad">Actividades</span>
+            <span class="navitem__meta">Estructura</span>
+          </button>
+          <button class="navitem" data-entity="CFG_Indicador">
+            <span class="navitem__title" data-label="CFG_Indicador">Indicadores</span>
+            <span class="navitem__meta">Estructura</span>
+          </button>
+
+          <div class="navgroup">Seguridad y asignaciones</div>
+          <button class="navitem" data-entity="SEG_Persona">
+            <span class="navitem__title" data-label="SEG_Persona">Personas</span>
+            <span class="navitem__meta">Seguridad</span>
+          </button>
+          <button class="navitem" data-entity="SEG_Asignacion">
+            <span class="navitem__title" data-label="SEG_Asignacion">Asignaciones</span>
+            <span class="navitem__meta">Seguridad</span>
+          </button>
+          <button class="navitem" data-entity="SEG_OTP">
+            <span class="navitem__title" data-label="SEG_OTP">OTP (auditoría)</span>
+            <span class="navitem__meta">Seguridad</span>
+          </button>
+        </div>
+
+        <div class="footer footer--panel">
+          <span class="muted">Tip: Este módulo es solo OAP. El reporte trimestral usa REP_*.</span>
+        </div>
+      </aside>
+
+      <!-- Contenido derecho (listado + acciones arriba) -->
+      <section class="panel panel--content2" aria-label="Contenido">
+        <div class="panel__header panel__header--content">
+          <div>
+            <h2 id="h-entity">PAC</h2>
+            <p class="muted" id="p-entity">Administra los registros de la tabla seleccionada.</p>
+          </div>
+
+          <div class="toolbar">
+            <input class="inp-search" id="txt-search" type="search" placeholder="Buscar…" />
+            <select id="sel-vigencia" class="sel-small" title="Vigencia">
+              <option value="">Todas</option>
+              <option value="2024">2024</option>
+              <option value="2025">2025</option>
+              <option value="2026" selected>2026</option>
+              <option value="2027">2027</option>
+            </select>
+            <button class="btn btn--primary" id="btn-new">+ Nuevo registro</button>
+          </div>
+        </div>
+
+        <div class="content">
+          <div class="tablewrap">
+            <table class="tbl" id="tbl">
+              <thead id="tbl-head"></thead>
+              <tbody id="tbl-body"></tbody>
+            </table>
+          </div>
+
+          <div class="status" id="status" role="status" aria-live="polite"></div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Modal -->
+    <div class="modal" id="modal" aria-hidden="true">
+      <div class="modal__card" role="dialog" aria-modal="true" aria-label="Formulario">
+        <div class="modal__head">
+          <div>
+            <div class="modal__title" id="modal-title">Nuevo</div>
+            <div class="muted" id="modal-subtitle">Completa los campos y guarda.</div>
+          </div>
+          <button class="btn btn--ghost" id="btn-close">Cerrar</button>
+        </div>
+
+        <div class="modal__body">
+          <div id="form-dynamic"></div>
+        </div>
+
+        <div class="modal__foot">
+          <div class="muted" id="modal-hint">Validación básica y relaciones.</div>
+          <div class="modal__actions">
+            <button class="btn btn--danger" id="btn-delete" style="display:none;">Eliminar</button>
+            <button class="btn btn--primary" id="btn-save">Guardar</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <footer class="footer">
+      <span class="muted">Admin UI • DATA-PAC</span>
+    </footer>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
