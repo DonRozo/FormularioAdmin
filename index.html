@@ -16,12 +16,12 @@
         <div class="brand__dot"></div>
         <div class="brand__text">
           <div class="brand__title">DATA-PAC</div>
-          <div class="brand__subtitle">Administración OAP • Catálogos, Estructura y Seguridad</div>
+          <div class="brand__subtitle">Administración OAP • Catálogos, Planeación y Seguridad</div>
         </div>
       </div>
 
       <div class="topbar__right">
-        <div class="pill" id="pill-service">Servicio: DATAPAC_V1</div>
+        <div class="pill" id="pill-service">Servicio: DATAPAC_V2</div>
         <button class="btn btn--ghost" id="btn-reload">Recargar</button>
       </div>
     </header>
@@ -36,7 +36,7 @@
         </div>
 
         <div class="navlist" id="navlist">
-          <!-- Se llena por HTML estático (botones) -->
+          <!-- Estructura jerárquica -->
           <button class="navitem is-active" data-entity="CFG_PAC">
             <span class="navitem__title" data-label="CFG_PAC">PAC</span>
             <span class="navitem__meta">Estructura</span>
@@ -63,9 +63,23 @@
             <span class="navitem__title" data-label="CFG_Actividad">Actividades</span>
             <span class="navitem__meta">Estructura</span>
           </button>
-          <button class="navitem" data-entity="CFG_Indicador">
-            <span class="navitem__title" data-label="CFG_Indicador">Indicadores</span>
+          <button class="navitem" data-entity="CFG_SubActividad">
+            <span class="navitem__title" data-label="CFG_SubActividad">Subactividades</span>
             <span class="navitem__meta">Estructura</span>
+          </button>
+          <button class="navitem" data-entity="CFG_Tarea">
+            <span class="navitem__title" data-label="CFG_Tarea">Tareas</span>
+            <span class="navitem__meta">Estructura</span>
+          </button>
+
+          <div class="navgroup">Planeación por vigencia</div>
+          <button class="navitem" data-entity="PLAN_SubActividadVigencia">
+            <span class="navitem__title" data-label="PLAN_SubActividadVigencia">Plan Subactividad</span>
+            <span class="navitem__meta">Planeación</span>
+          </button>
+          <button class="navitem" data-entity="PLAN_TareaVigencia">
+            <span class="navitem__title" data-label="PLAN_TareaVigencia">Plan Tarea</span>
+            <span class="navitem__meta">Planeación</span>
           </button>
 
           <div class="navgroup">Seguridad y asignaciones</div>
@@ -81,10 +95,32 @@
             <span class="navitem__title" data-label="SEG_OTP">OTP (auditoría)</span>
             <span class="navitem__meta">Seguridad</span>
           </button>
+
+          <div class="navgroup">Consulta (solo lectura)</div>
+          <button class="navitem" data-entity="FIN_ResumenTodoGastoActividad">
+            <span class="navitem__title" data-label="FIN_ResumenTodoGastoActividad">Resumen TodoGasto</span>
+            <span class="navitem__meta">Financiero</span>
+          </button>
+          <button class="navitem" data-entity="FIN_TodoGasto">
+            <span class="navitem__title" data-label="FIN_TodoGasto">TodoGasto (detalle)</span>
+            <span class="navitem__meta">Financiero</span>
+          </button>
+          <button class="navitem" data-entity="REP_ReporteNarrativo">
+            <span class="navitem__title" data-label="REP_ReporteNarrativo">Reporte narrativo</span>
+            <span class="navitem__meta">Reporte</span>
+          </button>
+          <button class="navitem" data-entity="REP_AvanceTarea">
+            <span class="navitem__title" data-label="REP_AvanceTarea">Avance de tarea</span>
+            <span class="navitem__meta">Reporte</span>
+          </button>
+          <button class="navitem" data-entity="REP_TareaUbicacion_PT">
+            <span class="navitem__title" data-label="REP_TareaUbicacion_PT">Ubicaciones</span>
+            <span class="navitem__meta">Geografía</span>
+          </button>
         </div>
 
         <div class="footer footer--panel">
-          <span class="muted">Tip: Este módulo es solo OAP. El reporte trimestral usa REP_*.</span>
+          <span class="muted">Tip: En formularios, los campos GlobalID/GUID están ocultos y las relaciones se seleccionan por listas.</span>
         </div>
       </aside>
 
