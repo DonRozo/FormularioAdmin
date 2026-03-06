@@ -383,8 +383,24 @@ function isGuidLikeField(entityKey, fieldName){
   return (f.type === "esriFieldTypeGUID" || f.type === "esriFieldTypeGlobalID");
 }
 function shouldHideField(entityKey, fieldName){
-  if (isGuidLikeField(entityKey, fieldName)) return true;
+  // 1. Ocultar siempre el PK principal de la tabla actual
+  if (fieldName === "GlobalID") return true;
+  
+  // 2. Ocultar campos técnicos internos
   if (["PersonaID","IndicadorID"].includes(fieldName)) return true;
+  
+  // 3. LA MAGIA: Ocultar los campos de texto redundantes del PADRE (ej. PACID en CFG_Linea).
+  // Así el usuario solo verá el Dropdown relacional y no se confundirá con dos campos de código.
+  const isParentCode = (
+    (entityKey === "CFG_Linea" && fieldName === "PACID") ||
+    (entityKey === "CFG_Programa" && fieldName === "LineaID") ||
+    (entityKey === "CFG_Proyecto" && fieldName === "ProgramaID") ||
+    (entityKey === "CFG_Objetivo" && fieldName === "ProyectoID") ||
+    (entityKey === "CFG_Actividad" && fieldName === "ObjetivoID")
+  );
+  if (isParentCode) return true;
+
+  // 4. DEJAR VISIBLES las llaves foráneas (PACGlobalID, LineaGlobalID, etc.) para que formen el select.
   return false;
 }
 
@@ -685,22 +701,27 @@ function wireSelectDependencies(entityKey) {
   formDyn.querySelectorAll('select[data-fk="1"]').forEach(sel => {
       sel.addEventListener('change', (e) => {
           const globalId = e.target.value;
-          const fieldName = sel.getAttribute('data-field');
+          const fieldName = sel.getAttribute('data-field'); // Ej: PACGlobalID
           
-          // Buscar si hay un campo de texto equivalente (ej. PACGlobalID -> PACID)
+          // Buscar el campo de texto oculto equivalente (Ej: PACGlobalID -> PACID)
           const stringIdField = fieldName.replace("GlobalID", "ID");
           const inputStringId = formDyn.querySelector(`[data-field="${stringIdField}"]`);
 
-          if (inputStringId && globalId) {
-              const targetEntity = SELECT_RULES[entityKey][fieldName].entity;
-              const parentObj = catalogs[targetEntity].find(x => String(x.GlobalID) === String(globalId));
-              if (parentObj && parentObj[stringIdField]) {
-                  inputStringId.value = parentObj[stringIdField];
-                  inputStringId.dispatchEvent(new Event('input')); // disparar contador
+          if (inputStringId) {
+              if (globalId) {
+                  const targetEntity = SELECT_RULES[entityKey][fieldName].entity;
+                  const parentObj = catalogs[targetEntity].find(x => String(x.GlobalID) === String(globalId));
+                  if (parentObj && parentObj[stringIdField]) {
+                      inputStringId.value = parentObj[stringIdField]; // Autocompleta el campo oculto
+                  } else {
+                      inputStringId.value = "";
+                  }
+              } else {
+                  inputStringId.value = "";
               }
           }
           
-          updateWeightHelper(entityKey); // Actualizar helper de peso si cambia el padre
+          updateWeightHelper(entityKey); // Actualiza el cálculo de pesos si cambias de padre
       });
   });
 
