@@ -1,5 +1,7 @@
 /* ===========================================================
    DATA-PAC | Admin OAP (script.js) - DATAPAC_V2
+   - Versión consolidada con validaciones estrictas, 
+     manejo relacional y protección de pesos (%)
    =========================================================== */
 
 const SERVICE_URL =
@@ -42,21 +44,16 @@ const FRIENDLY = {
   CFG_Actividad: "Actividades",
   CFG_SubActividad: "Subactividades",
   CFG_Tarea: "Tareas",
-
   PLAN_SubActividadVigencia: "Plan Subactividad (Vigencia)",
   PLAN_TareaVigencia: "Plan Tarea (Vigencia)",
-
   SEG_Persona: "Personas",
   SEG_Asignacion: "Asignaciones",
   SEG_OTP: "OTP (auditoría)",
-
   FIN_ResumenTodoGastoActividad: "Resumen TodoGasto (Actividad)",
   FIN_TodoGasto: "TodoGasto (Detalle)",
-
   REP_ReporteNarrativo: "Reporte narrativo",
   REP_AvanceTarea: "Avance de tarea",
   REP_TareaUbicacion_PT: "Ubicaciones de avance",
-
   REP_AvanceSubActividad: "Avance Subactividad (calc)",
   REP_AvanceActividad: "Avance Actividad (calc)"
 };
@@ -70,26 +67,20 @@ const FRIENDLY_DESC = {
   CFG_Actividad: "Actividades (dependen de un Objetivo).",
   CFG_SubActividad: "Subactividades (dependen de una Actividad).",
   CFG_Tarea: "Tareas (dependen de una Subactividad).",
-
   PLAN_SubActividadVigencia: "Planeación por vigencia (meta/peso/aplica) de Subactividades.",
   PLAN_TareaVigencia: "Planeación por vigencia (meta/peso/aplica) de Tareas.",
-
   SEG_Persona: "Personas/usuarios para asignación y trazabilidad.",
   SEG_Asignacion: "Asigna qué persona reporta qué tarea (y su vigencia).",
   SEG_OTP: "Auditoría y control de códigos OTP.",
-
   FIN_ResumenTodoGastoActividad: "Resumen financiero por ActividadID (solo lectura).",
   FIN_TodoGasto: "Movimientos financieros por Actividad (solo lectura).",
-
   REP_ReporteNarrativo: "Registro narrativo trimestral por Actividad (solo lectura).",
   REP_AvanceTarea: "Avances reportados por tarea (solo lectura).",
   REP_TareaUbicacion_PT: "Ubicación geográfica de avances (solo lectura).",
-
   REP_AvanceSubActividad: "Avance calculado (AUTO) por Subactividad (solo lectura).",
   REP_AvanceActividad: "Avance calculado (AUTO) por Actividad (solo lectura)."
 };
 
-/* ===== Entidades de solo lectura ===== */
 const READONLY = new Set([
   "FIN_ResumenTodoGastoActividad",
   "FIN_TodoGasto",
@@ -109,29 +100,22 @@ const FIELDS = {
   CFG_Proyecto:   ["ProyectoID","ProgramaID","ProgramaGlobalID","Nombre","Peso","Vigencia","Activo","GlobalID"],
   CFG_Objetivo:   ["ObjetivoID","ProyectoID","ProyectoGlobalID","Nombre","Peso","Vigencia","Activo","GlobalID"],
   CFG_Actividad:  ["ActividadID","ObjetivoID","ObjetivoGlobalID","Nombre","NombreActividad","Peso","Vigencia","VigenciaInicio","VigenciaFin","Activo","GlobalID"],
-
   CFG_SubActividad:["CodigoSubActividad","ActividadGlobalID","NombreSubActividad","SiglaVariable","UnidadMedida","GlobalID"],
   CFG_Tarea:      ["CodigoTarea","SubActividadGlobalID","NombreTarea","Definicion","Orden","UnidadMedida","FrecuenciaReporte","TipoValorAvance","EsGeorreferenciable","GlobalID"],
-
   PLAN_SubActividadVigencia:["SubActividadGlobalID","Vigencia","Aplica","MetaProgramada","PesoSubActividad","ObservacionesPlaneacion","GlobalID"],
   PLAN_TareaVigencia:["TareaGlobalID","Vigencia","Aplica","MetaProgramada","PesoTarea","Orden","GlobalID"],
-
   SEG_Persona:    ["Cedula","Nombre","Correo","Dependencia","Activo","PersonaID","GlobalID"],
   SEG_Asignacion: ["PersonaGlobalID","TareaGlobalID","ActividadID","IndicadorID","Vigencia","Activo","GlobalID"],
-
   FIN_ResumenTodoGastoActividad:["ActividadID","FechaCorte","Comprometido","Obligado","Pagos","PorcPagos","GlobalID"],
   FIN_TodoGasto:  ["ActividadID","ActividadGlobalID","FechaCorte","Fuente","CompromisoInicial","CompromisoFinal","SaldoCompromiso","Obligaciones","Pagos","GlobalID"],
-
   REP_ReporteNarrativo:["ActividadGlobalID","Vigencia","Periodo","Responsable","TextoNarrativo","PrincipalesLogros","DescripcionLogrosAlcanzados","FechaRegistro","GlobalID"],
-
   REP_AvanceTarea:["TareaGlobalID","Vigencia","Periodo","ValorReportado","Responsable","Observaciones","EvidenciaURL","FechaRegistro","GlobalID"],
   REP_TareaUbicacion_PT:["AvanceTareaGlobalID","CodigoDANE","MunicipioNombre","DescripcionSitio","FechaRegistro","GlobalID"],
-
   REP_AvanceSubActividad:["SubActividadGlobalID","Vigencia","Periodo","AplicaVigencia","PesoEfectivoVigencia","AvanceCalculado","FechaCalculo","GlobalID"],
   REP_AvanceActividad:["ActividadGlobalID","Vigencia","Periodo","AvanceCalculado","FechaCalculo","GlobalID"]
 };
 
-/* ===== Campos visibles por entidad (UI) - sin GUID/GlobalID ===== */
+/* ===== Campos visibles por entidad (UI tablas) ===== */
 const DISPLAY_FIELDS = {
   CFG_PAC:        ["PACID","Nombre","Peso","Vigencia","Activo"],
   CFG_Linea:      ["LineaID","PACID","Nombre","Peso","Vigencia","Activo"],
@@ -139,23 +123,17 @@ const DISPLAY_FIELDS = {
   CFG_Proyecto:   ["ProyectoID","ProgramaID","Nombre","Peso","Vigencia","Activo"],
   CFG_Objetivo:   ["ObjetivoID","ProyectoID","Nombre","Peso","Vigencia","Activo"],
   CFG_Actividad:  ["ActividadID","ObjetivoID","Nombre","Peso","Vigencia","VigenciaInicio","VigenciaFin","Activo"],
-
   CFG_SubActividad:["CodigoSubActividad","ActividadGlobalID","NombreSubActividad","SiglaVariable","UnidadMedida"],
   CFG_Tarea:      ["CodigoTarea","SubActividadGlobalID","NombreTarea","Orden","UnidadMedida","FrecuenciaReporte","TipoValorAvance","EsGeorreferenciable"],
-
   PLAN_SubActividadVigencia:["SubActividadGlobalID","Vigencia","Aplica","MetaProgramada","PesoSubActividad"],
   PLAN_TareaVigencia:["TareaGlobalID","Vigencia","Aplica","MetaProgramada","PesoTarea","Orden"],
-
   SEG_Persona:    ["Cedula","Nombre","Correo","Dependencia","Activo"],
   SEG_Asignacion: ["PersonaGlobalID","TareaGlobalID","Vigencia","Activo"],
-
   FIN_ResumenTodoGastoActividad:["ActividadID","FechaCorte","Comprometido","Obligado","Pagos","PorcPagos"],
   FIN_TodoGasto:  ["ActividadID","FechaCorte","Fuente","CompromisoInicial","CompromisoFinal","SaldoCompromiso","Obligaciones","Pagos"],
-
   REP_ReporteNarrativo:["ActividadGlobalID","Vigencia","Periodo","Responsable","PrincipalesLogros","FechaRegistro"],
   REP_AvanceTarea:["TareaGlobalID","Vigencia","Periodo","ValorReportado","Responsable","FechaRegistro"],
   REP_TareaUbicacion_PT:["AvanceTareaGlobalID","MunicipioNombre","DescripcionSitio","FechaRegistro"],
-
   REP_AvanceSubActividad:["SubActividadGlobalID","Vigencia","Periodo","AplicaVigencia","PesoEfectivoVigencia","AvanceCalculado","FechaCalculo"],
   REP_AvanceActividad:["ActividadGlobalID","Vigencia","Periodo","AvanceCalculado","FechaCalculo"]
 };
@@ -163,11 +141,11 @@ const DISPLAY_FIELDS = {
 const COL_LABEL = {
   Nombre:"Nombre", Peso:"Peso", Vigencia:"Vigencia", Activo:"Activo", GlobalID:"GlobalID",
   PACID:"Código PAC", LineaID:"Código Línea", ProgramaID:"Código Programa", ProyectoID:"Código Proyecto", ObjetivoID:"Código Objetivo", ActividadID:"Código Actividad",
-  PACGlobalID:"PAC Padre", LineaGlobalID:"Línea Padre", ProgramaGlobalID:"Programa Padre", ProyectoGlobalID:"Proyecto Padre", ObjetivoGlobalID:"Objetivo Padre",
+  PACGlobalID:"Seleccionar PAC Padre", LineaGlobalID:"Seleccionar Línea Padre", ProgramaGlobalID:"Seleccionar Programa Padre", ProyectoGlobalID:"Seleccionar Proyecto Padre", ObjetivoGlobalID:"Seleccionar Objetivo Padre", ActividadGlobalID:"Seleccionar Actividad Padre",
   NombreActividad:"Nombre actividad", VigenciaInicio:"Vigencia inicio", VigenciaFin:"Vigencia fin",
-  CodigoSubActividad:"Código Subactividad", ActividadGlobalID:"Actividad Padre", NombreSubActividad:"Nombre Subactividad", SiglaVariable:"Sigla/Variable", UnidadMedida:"Unidad", CodigoTarea:"Código Tarea", SubActividadGlobalID:"Subactividad Padre", NombreTarea:"Nombre Tarea", Definicion:"Definición", Orden:"Orden", FrecuenciaReporte:"Frecuencia", TipoValorAvance:"Tipo valor avance", EsGeorreferenciable:"Georreferenciable",
-  Aplica:"Aplica", MetaProgramada:"Meta programada", ObservacionesPlaneacion:"Observaciones", PesoSubActividad:"Peso Subactividad", TareaGlobalID:"Tarea", PesoTarea:"Peso Tarea",
-  Cedula:"Cédula", Correo:"Correo", Dependencia:"Dependencia", PersonaID:"PersonaID", PersonaGlobalID:"Persona",
+  CodigoSubActividad:"Código Subactividad", NombreSubActividad:"Nombre Subactividad", SiglaVariable:"Sigla/Variable", UnidadMedida:"Unidad", CodigoTarea:"Código Tarea", SubActividadGlobalID:"Seleccionar Subactividad Padre", NombreTarea:"Nombre Tarea", Definicion:"Definición", Orden:"Orden", FrecuenciaReporte:"Frecuencia", TipoValorAvance:"Tipo valor avance", EsGeorreferenciable:"Georreferenciable",
+  Aplica:"Aplica", MetaProgramada:"Meta programada", ObservacionesPlaneacion:"Observaciones", PesoSubActividad:"Peso Subactividad", TareaGlobalID:"Seleccionar Tarea", PesoTarea:"Peso Tarea",
+  Cedula:"Cédula", Correo:"Correo", Dependencia:"Dependencia", PersonaID:"PersonaID", PersonaGlobalID:"Seleccionar Persona",
   FechaCorte:"Fecha corte", Fuente:"Fuente", Comprometido:"Comprometido", Obligado:"Obligado", Pagos:"Pagos", PorcPagos:"% Pagos", CompromisoInicial:"Compromiso inicial", CompromisoFinal:"Compromiso final", SaldoCompromiso:"Saldo compromiso", Obligaciones:"Obligaciones",
   Periodo:"Periodo", Responsable:"Responsable", TextoNarrativo:"Texto narrativo", PrincipalesLogros:"Principales logros", DescripcionLogrosAlcanzados:"Descripción logros", FechaRegistro:"Fecha registro", ValorReportado:"Valor reportado", Observaciones:"Observaciones", EvidenciaURL:"Evidencia (URL)",
   AvanceTareaGlobalID:"Avance Tarea", CodigoDANE:"Código DANE", MunicipioNombre:"Municipio", DescripcionSitio:"Descripción sitio", Shape:"Geometría",
@@ -176,9 +154,9 @@ const COL_LABEL = {
 
 const FIELD_UI = {
   Vigencia:{ type:"number", min:2020, max:2100 },
-  Peso:{ type:"number", step:"any" },
-  PesoSubActividad:{ type:"number", step:"any" },
-  PesoTarea:{ type:"number", step:"any" },
+  Peso:{ type:"number", step:"0.01", min:0.01, max:100 },
+  PesoSubActividad:{ type:"number", step:"0.01", min:0.01, max:100 },
+  PesoTarea:{ type:"number", step:"0.01", min:0.01, max:100 },
   MetaProgramada:{ type:"number", step:"any" },
   ValorReportado:{ type:"number", step:"any" },
   Comprometido:{ type:"number", step:"any" },
@@ -210,18 +188,14 @@ const PARENT_RULES = {
   CFG_Actividad:   { parentField:"ObjetivoGlobalID",  parentEntity:"CFG_Objetivo",   weightField:"Peso" },
   CFG_SubActividad:{ parentField:"ActividadGlobalID", parentEntity:"CFG_Actividad",  weightField:null },
   CFG_Tarea:       { parentField:"SubActividadGlobalID", parentEntity:"CFG_SubActividad", weightField:null },
-
   PLAN_SubActividadVigencia:{ parentField:"SubActividadGlobalID", parentEntity:"CFG_SubActividad", weightField:"PesoSubActividad" },
   PLAN_TareaVigencia:       { parentField:"TareaGlobalID",        parentEntity:"CFG_Tarea",        weightField:"PesoTarea" },
-
   REP_AvanceTarea:{ parentField:"TareaGlobalID", parentEntity:"CFG_Tarea", weightField:null },
   REP_TareaUbicacion_PT:{ parentField:"AvanceTareaGlobalID", parentEntity:"REP_AvanceTarea", weightField:null },
   REP_ReporteNarrativo:{ parentField:"ActividadGlobalID", parentEntity:"CFG_Actividad", weightField:null },
-
   SEG_Asignacion:{ parentField:"PersonaGlobalID", parentEntity:"SEG_Persona", weightField:null }
 };
 
-/* ===== Selects adicionales (FK no jerárquico) ===== */
 const SELECT_RULES = {
   SEG_Asignacion: { PersonaGlobalID: { entity:"SEG_Persona" }, TareaGlobalID: { entity:"CFG_Tarea" } },
   CFG_Linea: { PACGlobalID: { entity:"CFG_PAC" } },
@@ -263,7 +237,6 @@ const CHILDREN_RULES = [
 let currentEntityKey = "CFG_PAC";
 let currentRows = [];
 let editingRow = null;
-
 let catalogs = {
   CFG_PAC:[], CFG_Linea:[], CFG_Programa:[], CFG_Proyecto:[], CFG_Objetivo:[], CFG_Actividad:[],
   CFG_SubActividad:[], CFG_Tarea:[], SEG_Persona:[], REP_AvanceTarea:[]
@@ -317,7 +290,6 @@ function setStatus(msg, type="info"){
   if (!elStatus) return;
   const prefix = type==="error" ? "❌ " : (type==="success" ? "✅ " : "ℹ️ ");
   elStatus.textContent = prefix + msg;
-  // Alerta visible para errores de validación
   if(type==="error") alert(msg); 
 }
 function esc(s){
@@ -352,7 +324,6 @@ async function postForm(url, obj){
 /* ===== Metadata ===== */
 async function loadEntityMetadata(key){
   if (metaCache[key]) return metaCache[key];
-
   const meta = await fetchJson(`${entityUrl(key)}?f=pjson`, {});
   const fieldsByName = {};
   const domainsByField = {};
@@ -370,6 +341,7 @@ async function loadEntityMetadata(key){
   fieldLengths[key] = lengths;
   return metaCache[key];
 }
+
 function getMaxLenForField(entityKey, fieldName){
   const m = fieldLengths[entityKey] || {};
   if (m[fieldName]) return m[fieldName];
@@ -377,20 +349,17 @@ function getMaxLenForField(entityKey, fieldName){
   if (fieldName.endsWith("ID")) return 80;
   return DEFAULT_MAXLEN;
 }
+
 function isGuidLikeField(entityKey, fieldName){
   const f = metaCache[entityKey]?.fieldsByName?.[fieldName];
   if (!f) return false;
   return (f.type === "esriFieldTypeGUID" || f.type === "esriFieldTypeGlobalID");
 }
+
 function shouldHideField(entityKey, fieldName){
-  // 1. Ocultar siempre el PK principal de la tabla actual
   if (fieldName === "GlobalID") return true;
-  
-  // 2. Ocultar campos técnicos internos
   if (["PersonaID","IndicadorID"].includes(fieldName)) return true;
   
-  // 3. LA MAGIA: Ocultar los campos de texto redundantes del PADRE (ej. PACID en CFG_Linea).
-  // Así el usuario solo verá el Dropdown relacional y no se confundirá con dos campos de código.
   const isParentCode = (
     (entityKey === "CFG_Linea" && fieldName === "PACID") ||
     (entityKey === "CFG_Programa" && fieldName === "LineaID") ||
@@ -400,7 +369,6 @@ function shouldHideField(entityKey, fieldName){
   );
   if (isParentCode) return true;
 
-  // 4. DEJAR VISIBLES las llaves foráneas (PACGlobalID, LineaGlobalID, etc.) para que formen el select.
   return false;
 }
 
@@ -426,10 +394,8 @@ async function loadCatalogs(){
   catalogs.CFG_Proyecto   = await list("CFG_Proyecto",   "GlobalID,ProyectoID,Nombre,ProgramaID,ProgramaGlobalID,Vigencia", "Nombre ASC");
   catalogs.CFG_Objetivo   = await list("CFG_Objetivo",   "GlobalID,ObjetivoID,Nombre,ProyectoID,ProyectoGlobalID,Vigencia", "Nombre ASC");
   catalogs.CFG_Actividad  = await list("CFG_Actividad",  "GlobalID,ActividadID,Nombre,ObjetivoID,ObjetivoGlobalID,Vigencia,Activo", "Nombre ASC");
-
   catalogs.CFG_SubActividad = await list("CFG_SubActividad", "GlobalID,CodigoSubActividad,NombreSubActividad,ActividadGlobalID", "NombreSubActividad ASC");
   catalogs.CFG_Tarea        = await list("CFG_Tarea",        "GlobalID,CodigoTarea,NombreTarea,SubActividadGlobalID,Orden", "Orden ASC");
-
   catalogs.SEG_Persona    = await list("SEG_Persona",    "GlobalID,Cedula,Nombre,Correo,Activo", "Nombre ASC");
   catalogs.REP_AvanceTarea = await list("REP_AvanceTarea", "GlobalID,TareaGlobalID,Vigencia,Periodo,FechaRegistro", "FechaRegistro DESC");
 }
@@ -459,15 +425,15 @@ function buildWhere(key){
   if (q){
     const candidates = ["Nombre","NombreActividad","NombreSubActividad","NombreTarea","PACID","LineaID","ProgramaID","ProyectoID","ObjetivoID","ActividadID","CodigoSubActividad","CodigoTarea","Cedula","Correo","Dependencia","Fuente","MunicipioNombre","DescripcionSitio","Responsable"];
     const usable = candidates.filter(f => (FIELDS[key] || []).includes(f));
-    if (usable.length){
-      parts.push("(" + usable.map(f => `${f} LIKE '%${q}%'`).join(" OR ") + ")");
-    }
+    if (usable.length) parts.push("(" + usable.map(f => `${f} LIKE '%${q}%'`).join(" OR ") + ")");
   }
   return parts.join(" AND ");
 }
 
 function renderTable(key, rows){
-  const cols = ["__actions", ...(DISPLAY_FIELDS[key] || (FIELDS[key] || []).filter(f=>!shouldHideField(key,f)))];
+  // Mostrar campo de texto en lugar del GlobalID para que la tabla sea legible
+  const fieldsToShow = DISPLAY_FIELDS[key] || (FIELDS[key] || []).filter(f=>!shouldHideField(key,f));
+  const cols = ["__actions", ...fieldsToShow];
 
   elHead.innerHTML = `<tr>${cols.map(c => c==="__actions" ? `<th style="width:210px;">Acciones</th>` : `<th title="${esc(c)}">${esc(labelCol(c))}</th>`).join("")}</tr>`;
 
@@ -588,7 +554,6 @@ function makeInput(entityKey, fieldName, value){
   const selectRule = SELECT_RULES?.[entityKey]?.[fieldName];
   if (selectRule?.entity) return makeSelectField(entityKey, fieldName, selectRule.entity, value);
 
-  // **MEJORA: Dominios como <select> estrictos**
   const codedValues = metaCache[entityKey]?.domainsByField?.[fieldName];
   if (codedValues || ui.type === "select") {
     let opts = "";
@@ -624,11 +589,17 @@ function makeInput(entityKey, fieldName, value){
   if(ui.step!==undefined) attrs.push(`step="${ui.step}"`);
 
   const showCounter = (ui.type === "text" || ui.type === "email" || ui.type === undefined);
+  
   return `
     <div class="field">
       <label>${esc(labelCol(fieldName))} *</label>
-      <input ${attrs.join(" ")} type="${ui.type || "text"}" data-field="${esc(fieldName)}" value="${esc(value ?? "")}"
-        ${showCounter ? `maxlength="${maxLen}" data-maxlen="${maxLen}"` : ""} />
+      <div style="position: relative; display: flex; align-items: center;">
+        <input ${attrs.join(" ")} type="${ui.type || "text"}" data-field="${esc(fieldName)}" value="${esc(value ?? "")}"
+          ${showCounter ? `maxlength="${maxLen}" data-maxlen="${maxLen}"` : ""} 
+          style="${isWeight ? 'padding-right: 30px;' : ''}" />
+        
+        ${isWeight ? `<span style="position: absolute; right: 12px; font-weight: 900; color: rgba(14,23,30,0.4); pointer-events: none;">%</span>` : ""}
+      </div>
       <div class="field__meta">
         <div class="help-text">${esc(help)}</div>
         ${isWeight ? `<span class="weight-helper" style="font-weight:900; color:var(--primary-2);"></span>` : (showCounter ? `<span class="charcount" data-cc-for="${esc(fieldName)}">${maxLen}</span>` : `<span></span>`)}
@@ -654,7 +625,6 @@ function wireCharCounters(){
   });
 }
 
-/* **MEJORA: Ayuda visual para la suma de pesos** */
 async function updateWeightHelper(entityKey) {
   const rule = PARENT_RULES[entityKey];
   if (!rule || !rule.weightField) return;
@@ -696,14 +666,12 @@ async function updateWeightHelper(entityKey) {
   }
 }
 
-/* **MEJORA: Auto-llenado de ID Textual basado en GUID Seleccionado** */
 function wireSelectDependencies(entityKey) {
   formDyn.querySelectorAll('select[data-fk="1"]').forEach(sel => {
       sel.addEventListener('change', (e) => {
           const globalId = e.target.value;
-          const fieldName = sel.getAttribute('data-field'); // Ej: PACGlobalID
+          const fieldName = sel.getAttribute('data-field'); 
           
-          // Buscar el campo de texto oculto equivalente (Ej: PACGlobalID -> PACID)
           const stringIdField = fieldName.replace("GlobalID", "ID");
           const inputStringId = formDyn.querySelector(`[data-field="${stringIdField}"]`);
 
@@ -712,7 +680,8 @@ function wireSelectDependencies(entityKey) {
                   const targetEntity = SELECT_RULES[entityKey][fieldName].entity;
                   const parentObj = catalogs[targetEntity].find(x => String(x.GlobalID) === String(globalId));
                   if (parentObj && parentObj[stringIdField]) {
-                      inputStringId.value = parentObj[stringIdField]; // Autocompleta el campo oculto
+                      inputStringId.value = parentObj[stringIdField]; 
+                      inputStringId.dispatchEvent(new Event('input')); 
                   } else {
                       inputStringId.value = "";
                   }
@@ -721,7 +690,7 @@ function wireSelectDependencies(entityKey) {
               }
           }
           
-          updateWeightHelper(entityKey); // Actualiza el cálculo de pesos si cambias de padre
+          updateWeightHelper(entityKey);
       });
   });
 
@@ -776,30 +745,53 @@ async function openModalEdit(entityKey, row){
   openModal();
 }
 
-/* ===== Validaciones ===== */
-/* **MEJORA: Campos estrictamente obligatorios** */
+/* ===== Validaciones y Lectura de Formulario ===== */
 function readForm(entityKey){
   const a = {};
   
-  // Campos que permitiremos dejar vacíos por diseño
+  // Campos que no son obligatorios
   const optionalFields = ["Observaciones", "ObservacionesPlaneacion", "Definicion", "TextoNarrativo", "PrincipalesLogros", "DescripcionLogrosAlcanzados", "EvidenciaURL", "DescripcionSitio"];
+  
+  // NUEVO: Campos que NO deben convertirse a mayúsculas (por legibilidad o formato técnico)
+  const noUppercaseFields = ["Correo", "EvidenciaURL", "Definicion", "Observaciones", "ObservacionesPlaneacion", "TextoNarrativo", "PrincipalesLogros", "DescripcionLogrosAlcanzados", "DescripcionSitio"];
 
   formDyn.querySelectorAll("[data-field]").forEach(el=>{
     const f = el.getAttribute("data-field");
     let v = el.value;
 
     const ui = FIELD_UI[f];
+    
+    // Tratamiento de números
     if (ui?.type === "number"){
       v = (v==="" ? null : Number(String(v).replace(",", ".")));
       if (v!==null && !isFinite(v)) v = null;
     }
 
-    if (v==="") v = null;
+    // Tratamiento de vacíos
+    if (v === "") v = null;
+
+    // NUEVO: Transformación automática a MAYÚSCULAS
+    if (typeof v === "string" && v !== null && !noUppercaseFields.includes(f)) {
+        v = v.toUpperCase();
+    }
+
+    // Asignar al objeto final
     a[f] = v;
 
-    // Validación de obligatoriedad
+    // Validación de campos obligatorios
     if ((v === null || v === "") && !optionalFields.includes(f) && !shouldHideField(entityKey, f)) {
         throw new Error(`El campo "${labelCol(f)}" es obligatorio.`);
+    }
+
+    // Validación estricta de porcentajes (Pesos)
+    if (f.includes("Peso") && v !== null) {
+        if (v <= 0 || v > 100) {
+            throw new Error(`El campo "${labelCol(f)}" es un porcentaje y debe ser un valor entre 0.01 y 100.`);
+        }
+        if (v < 1 && v > 0) {
+            const confirmar = confirm(`Ingresaste ${v}%. ¿Estás seguro de que este ítem vale menos del 1%? Si querías decir ${v * 100}%, dale a Cancelar y corrige el número.`);
+            if (!confirmar) throw new Error("Por favor, corrige el porcentaje antes de guardar.");
+        }
     }
   });
 
