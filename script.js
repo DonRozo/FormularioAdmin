@@ -1,13 +1,5 @@
 /* ===========================================================
    DATA-PAC | Admin OAP (script.js) - DATAPAC_V2
-   - Mantiene estética y UX
-   - GlobalID/GUID: ocultos en forms y no visibles en tablas
-   - Relaciones: dropdown obligatorio (padre) por jerarquía (usa *GlobalID)
-   - Dominios: autocomplete (datalist) + validación
-   - Pesos: suma hijos <= 100 por padre (+vigencia cuando aplica)
-   - Unicidad: códigos manuales (según tabla) + validación por alcance
-   - Delete seguro: no borrar padres con hijos
-   - Drawer Tablas: botón ☰ Tablas + overlay + ESC
    =========================================================== */
 
 const SERVICE_URL =
@@ -33,7 +25,7 @@ const ENTITY = {
   PLAN_TareaVigencia:{ id: 14, pk: "GlobalID" },
 
   SEG_Asignacion: { id: 15, pk: "GlobalID" },
-  SEG_Persona:    { id: 16, pk: "Cedula" }, // PK lógico en UI; técnicamente usa GlobalID
+  SEG_Persona:    { id: 16, pk: "Cedula" }, 
   SEG_OTP:        { id: 17, pk: "GlobalID" },
 
   FIN_ResumenTodoGastoActividad:{ id: 18, pk: "GlobalID" },
@@ -169,100 +161,19 @@ const DISPLAY_FIELDS = {
 };
 
 const COL_LABEL = {
-  // comunes
-  Nombre:"Nombre",
-  Peso:"Peso",
-  Vigencia:"Vigencia",
-  Activo:"Activo",
-  GlobalID:"GlobalID",
-
-  // estructura
-  PACID:"Código PAC",
-  LineaID:"Código Línea",
-  ProgramaID:"Código Programa",
-  ProyectoID:"Código Proyecto",
-  ObjetivoID:"Código Objetivo",
-  ActividadID:"Código Actividad",
-
-  PACGlobalID:"PAC (GlobalID)",
-  LineaGlobalID:"Línea (GlobalID)",
-  ProgramaGlobalID:"Programa (GlobalID)",
-  ProyectoGlobalID:"Proyecto (GlobalID)",
-  ObjetivoGlobalID:"Objetivo (GlobalID)",
-
-  // actividad ampliada
-  NombreActividad:"Nombre actividad",
-  VigenciaInicio:"Vigencia inicio",
-  VigenciaFin:"Vigencia fin",
-
-  // subactividad / tarea
-  CodigoSubActividad:"Código Subactividad",
-  ActividadGlobalID:"Actividad",
-  NombreSubActividad:"Nombre Subactividad",
-  SiglaVariable:"Sigla/Variable",
-  UnidadMedida:"Unidad",
-  CodigoTarea:"Código Tarea",
-  SubActividadGlobalID:"Subactividad",
-  NombreTarea:"Nombre Tarea",
-  Definicion:"Definición",
-  Orden:"Orden",
-  FrecuenciaReporte:"Frecuencia",
-  TipoValorAvance:"Tipo valor avance",
-  EsGeorreferenciable:"Georreferenciable",
-
-  // planeación
-  Aplica:"Aplica",
-  MetaProgramada:"Meta programada",
-  ObservacionesPlaneacion:"Observaciones",
-  PesoSubActividad:"Peso Subactividad",
-  TareaGlobalID:"Tarea",
-  PesoTarea:"Peso Tarea",
-
-  // seguridad
-  Cedula:"Cédula",
-  Correo:"Correo",
-  Dependencia:"Dependencia",
-  PersonaID:"PersonaID",
-  PersonaGlobalID:"Persona",
-
-  // financiero
-  FechaCorte:"Fecha corte",
-  Fuente:"Fuente",
-  Comprometido:"Comprometido",
-  Obligado:"Obligado",
-  Pagos:"Pagos",
-  PorcPagos:"% Pagos",
-  CompromisoInicial:"Compromiso inicial",
-  CompromisoFinal:"Compromiso final",
-  SaldoCompromiso:"Saldo compromiso",
-  Obligaciones:"Obligaciones",
-
-  // reportes
-  Periodo:"Periodo",
-  Responsable:"Responsable",
-  TextoNarrativo:"Texto narrativo",
-  PrincipalesLogros:"Principales logros",
-  DescripcionLogrosAlcanzados:"Descripción logros",
-  FechaRegistro:"Fecha registro",
-  ValorReportado:"Valor reportado",
-  Observaciones:"Observaciones",
-  EvidenciaURL:"Evidencia (URL)",
-
-  // ubicaciones
-  AvanceTareaGlobalID:"Avance Tarea",
-  CodigoDANE:"Código DANE",
-  MunicipioNombre:"Municipio",
-  DescripcionSitio:"Descripción sitio",
-  Shape:"Geometría",
-
-  // calculados
-  AplicaVigencia:"Aplica (vigencia)",
-  PesoEfectivoVigencia:"Peso efectivo",
-  AvanceCalculado:"Avance calculado",
-  FechaCalculo:"Fecha cálculo"
+  Nombre:"Nombre", Peso:"Peso", Vigencia:"Vigencia", Activo:"Activo", GlobalID:"GlobalID",
+  PACID:"Código PAC", LineaID:"Código Línea", ProgramaID:"Código Programa", ProyectoID:"Código Proyecto", ObjetivoID:"Código Objetivo", ActividadID:"Código Actividad",
+  PACGlobalID:"PAC Padre", LineaGlobalID:"Línea Padre", ProgramaGlobalID:"Programa Padre", ProyectoGlobalID:"Proyecto Padre", ObjetivoGlobalID:"Objetivo Padre",
+  NombreActividad:"Nombre actividad", VigenciaInicio:"Vigencia inicio", VigenciaFin:"Vigencia fin",
+  CodigoSubActividad:"Código Subactividad", ActividadGlobalID:"Actividad Padre", NombreSubActividad:"Nombre Subactividad", SiglaVariable:"Sigla/Variable", UnidadMedida:"Unidad", CodigoTarea:"Código Tarea", SubActividadGlobalID:"Subactividad Padre", NombreTarea:"Nombre Tarea", Definicion:"Definición", Orden:"Orden", FrecuenciaReporte:"Frecuencia", TipoValorAvance:"Tipo valor avance", EsGeorreferenciable:"Georreferenciable",
+  Aplica:"Aplica", MetaProgramada:"Meta programada", ObservacionesPlaneacion:"Observaciones", PesoSubActividad:"Peso Subactividad", TareaGlobalID:"Tarea", PesoTarea:"Peso Tarea",
+  Cedula:"Cédula", Correo:"Correo", Dependencia:"Dependencia", PersonaID:"PersonaID", PersonaGlobalID:"Persona",
+  FechaCorte:"Fecha corte", Fuente:"Fuente", Comprometido:"Comprometido", Obligado:"Obligado", Pagos:"Pagos", PorcPagos:"% Pagos", CompromisoInicial:"Compromiso inicial", CompromisoFinal:"Compromiso final", SaldoCompromiso:"Saldo compromiso", Obligaciones:"Obligaciones",
+  Periodo:"Periodo", Responsable:"Responsable", TextoNarrativo:"Texto narrativo", PrincipalesLogros:"Principales logros", DescripcionLogrosAlcanzados:"Descripción logros", FechaRegistro:"Fecha registro", ValorReportado:"Valor reportado", Observaciones:"Observaciones", EvidenciaURL:"Evidencia (URL)",
+  AvanceTareaGlobalID:"Avance Tarea", CodigoDANE:"Código DANE", MunicipioNombre:"Municipio", DescripcionSitio:"Descripción sitio", Shape:"Geometría",
+  AplicaVigencia:"Aplica (vigencia)", PesoEfectivoVigencia:"Peso efectivo", AvanceCalculado:"Avance calculado", FechaCalculo:"Fecha cálculo"
 };
 
-/* ===== UI hints ===== */
 const FIELD_UI = {
   Vigencia:{ type:"number", min:2020, max:2100 },
   Peso:{ type:"number", step:"any" },
@@ -279,20 +190,13 @@ const FIELD_UI = {
   SaldoCompromiso:{ type:"number", step:"any" },
   Obligaciones:{ type:"number", step:"any" },
   Orden:{ type:"number", step:"1", min:0 },
-  Correo:{ type:"email" },
-  Activo:{ type:"select", values:["SI","NO"] },
-  Aplica:{ type:"select", values:["SI","NO"] },
-  AplicaVigencia:{ type:"select", values:["SI","NO"] },
-  EsGeorreferenciable:{ type:"select", values:["SI","NO"] }
+  Correo:{ type:"email" }
 };
 
 const HELP_TEXT = {
-  Peso:"Decimales con punto. Ej: 1.5 (no 1,5).",
-  PesoSubActividad:"Peso (%) por vigencia para la Subactividad. Debe sumar máximo 100% por Actividad.",
-  PesoTarea:"Peso (%) por vigencia para la Tarea. Debe sumar máximo 100% por Subactividad.",
-  UnidadMedida:"Selecciona del listado (dominio si existe).",
-  FrecuenciaReporte:"Selecciona del listado (dominio).",
-  TipoValorAvance:"Selecciona del listado (dominio)."
+  Peso:"Suma máxima: 100% por padre.",
+  PesoSubActividad:"Debe sumar máximo 100% por Actividad.",
+  PesoTarea:"Debe sumar máximo 100% por Subactividad."
 };
 
 const DEFAULT_MAXLEN = 160;
@@ -310,7 +214,6 @@ const PARENT_RULES = {
   PLAN_SubActividadVigencia:{ parentField:"SubActividadGlobalID", parentEntity:"CFG_SubActividad", weightField:"PesoSubActividad" },
   PLAN_TareaVigencia:       { parentField:"TareaGlobalID",        parentEntity:"CFG_Tarea",        weightField:"PesoTarea" },
 
-  // reportes (para lookup)
   REP_AvanceTarea:{ parentField:"TareaGlobalID", parentEntity:"CFG_Tarea", weightField:null },
   REP_TareaUbicacion_PT:{ parentField:"AvanceTareaGlobalID", parentEntity:"REP_AvanceTarea", weightField:null },
   REP_ReporteNarrativo:{ parentField:"ActividadGlobalID", parentEntity:"CFG_Actividad", weightField:null },
@@ -320,40 +223,18 @@ const PARENT_RULES = {
 
 /* ===== Selects adicionales (FK no jerárquico) ===== */
 const SELECT_RULES = {
-  SEG_Asignacion: {
-    PersonaGlobalID: { entity:"SEG_Persona" },
-    TareaGlobalID:   { entity:"CFG_Tarea" }
-  },
-  CFG_Linea: {
-    PACGlobalID: { entity:"CFG_PAC" }
-  },
-  CFG_Programa: {
-    LineaGlobalID: { entity:"CFG_Linea" }
-  },
-  CFG_Proyecto: {
-    ProgramaGlobalID: { entity:"CFG_Programa" }
-  },
-  CFG_Objetivo: {
-    ProyectoGlobalID: { entity:"CFG_Proyecto" }
-  },
-  CFG_Actividad: {
-    ObjetivoGlobalID: { entity:"CFG_Objetivo" }
-  },
-  CFG_SubActividad: {
-    ActividadGlobalID: { entity:"CFG_Actividad" }
-  },
-  CFG_Tarea: {
-    SubActividadGlobalID: { entity:"CFG_SubActividad" }
-  },
-  PLAN_SubActividadVigencia: {
-    SubActividadGlobalID: { entity:"CFG_SubActividad" }
-  },
-  PLAN_TareaVigencia: {
-    TareaGlobalID: { entity:"CFG_Tarea" }
-  }
+  SEG_Asignacion: { PersonaGlobalID: { entity:"SEG_Persona" }, TareaGlobalID: { entity:"CFG_Tarea" } },
+  CFG_Linea: { PACGlobalID: { entity:"CFG_PAC" } },
+  CFG_Programa: { LineaGlobalID: { entity:"CFG_Linea" } },
+  CFG_Proyecto: { ProgramaGlobalID: { entity:"CFG_Programa" } },
+  CFG_Objetivo: { ProyectoGlobalID: { entity:"CFG_Proyecto" } },
+  CFG_Actividad: { ObjetivoGlobalID: { entity:"CFG_Objetivo" } },
+  CFG_SubActividad: { ActividadGlobalID: { entity:"CFG_Actividad" } },
+  CFG_Tarea: { SubActividadGlobalID: { entity:"CFG_SubActividad" } },
+  PLAN_SubActividadVigencia: { SubActividadGlobalID: { entity:"CFG_SubActividad" } },
+  PLAN_TareaVigencia: { TareaGlobalID: { entity:"CFG_Tarea" } }
 };
 
-/* ===== Reglas de unicidad ===== */
 const UNIQUE_RULES = [
   { entity:"CFG_PAC",        field:"PACID",        scope:["Vigencia"] },
   { entity:"CFG_Linea",      field:"LineaID",      scope:["Vigencia"] },
@@ -361,13 +242,10 @@ const UNIQUE_RULES = [
   { entity:"CFG_Proyecto",   field:"ProyectoID",   scope:["Vigencia"] },
   { entity:"CFG_Objetivo",   field:"ObjetivoID",   scope:["Vigencia"] },
   { entity:"CFG_Actividad",  field:"ActividadID",  scope:["Vigencia"] },
-
-  // Subactividad/Tarea: por padre
   { entity:"CFG_SubActividad", field:"CodigoSubActividad", scope:["ActividadGlobalID"] },
   { entity:"CFG_Tarea",        field:"CodigoTarea",        scope:["SubActividadGlobalID"] }
 ];
 
-/* ===== Bloqueo de borrado por hijos (relaciones con GlobalID) ===== */
 const CHILDREN_RULES = [
   { parent:"CFG_PAC",         child:"CFG_Linea",      fk:"PACGlobalID" },
   { parent:"CFG_Linea",       child:"CFG_Programa",   fk:"LineaGlobalID" },
@@ -376,10 +254,8 @@ const CHILDREN_RULES = [
   { parent:"CFG_Objetivo",    child:"CFG_Actividad",  fk:"ObjetivoGlobalID" },
   { parent:"CFG_Actividad",   child:"CFG_SubActividad",fk:"ActividadGlobalID" },
   { parent:"CFG_SubActividad",child:"CFG_Tarea",      fk:"SubActividadGlobalID" },
-
   { parent:"CFG_SubActividad",child:"PLAN_SubActividadVigencia", fk:"SubActividadGlobalID" },
   { parent:"CFG_Tarea",       child:"PLAN_TareaVigencia",        fk:"TareaGlobalID" },
-
   { parent:"SEG_Persona",     child:"SEG_Asignacion", fk:"PersonaGlobalID" }
 ];
 
@@ -403,10 +279,8 @@ const elBody = document.getElementById("tbl-body");
 const elSearch = document.getElementById("txt-search");
 const elVig = document.getElementById("sel-vigencia");
 const elStatus = document.getElementById("status");
-
 const btnReload = document.getElementById("btn-reload");
 const btnNew = document.getElementById("btn-new");
-
 const modal = document.getElementById("modal");
 const formDyn = document.getElementById("form-dynamic");
 const btnClose = document.getElementById("btn-close");
@@ -443,6 +317,8 @@ function setStatus(msg, type="info"){
   if (!elStatus) return;
   const prefix = type==="error" ? "❌ " : (type==="success" ? "✅ " : "ℹ️ ");
   elStatus.textContent = prefix + msg;
+  // Alerta visible para errores de validación
+  if(type==="error") alert(msg); 
 }
 function esc(s){
   return (s ?? "").toString()
@@ -507,7 +383,6 @@ function isGuidLikeField(entityKey, fieldName){
   return (f.type === "esriFieldTypeGUID" || f.type === "esriFieldTypeGlobalID");
 }
 function shouldHideField(entityKey, fieldName){
-  // ocultar cualquier GUID/GlobalID y los campos internos PersonaID/IndicadorID en admin
   if (isGuidLikeField(entityKey, fieldName)) return true;
   if (["PersonaID","IndicadorID"].includes(fieldName)) return true;
   return false;
@@ -522,16 +397,13 @@ async function loadCatalogs(){
     await loadEntityMetadata(key);
     const where = (FIELDS[key] || []).includes("Vigencia") ? vigWhere : "1=1";
     const r = await fetchJson(`${entityUrl(key)}/query`, {
-      f:"json",
-      where,
-      outFields,
+      f:"json", where, outFields,
       orderByFields: orderBy || outFields.split(",")[0] + " ASC",
       returnGeometry:"false"
     });
     return (r.features||[]).map(f=>f.attributes);
   }
 
-  // Estructura (incluye GlobalID + código + nombre)
   catalogs.CFG_PAC        = await list("CFG_PAC",        "GlobalID,PACID,Nombre,Vigencia", "Nombre ASC");
   catalogs.CFG_Linea      = await list("CFG_Linea",      "GlobalID,LineaID,Nombre,PACID,PACGlobalID,Vigencia", "Nombre ASC");
   catalogs.CFG_Programa   = await list("CFG_Programa",   "GlobalID,ProgramaID,Nombre,LineaID,LineaGlobalID,Vigencia", "Nombre ASC");
@@ -543,12 +415,9 @@ async function loadCatalogs(){
   catalogs.CFG_Tarea        = await list("CFG_Tarea",        "GlobalID,CodigoTarea,NombreTarea,SubActividadGlobalID,Orden", "Orden ASC");
 
   catalogs.SEG_Persona    = await list("SEG_Persona",    "GlobalID,Cedula,Nombre,Correo,Activo", "Nombre ASC");
-
-  // para resolver ubicaciones -> avance tarea
   catalogs.REP_AvanceTarea = await list("REP_AvanceTarea", "GlobalID,TareaGlobalID,Vigencia,Periodo,FechaRegistro", "FechaRegistro DESC");
 }
 
-/* ===== Lookups para mostrar en tablas (en vez de GlobalID) ===== */
 function lookupByGlobalId(list, globalId, labelFn){
   const x = (list || []).find(r => String(r.GlobalID) === String(globalId));
   return x ? labelFn(x) : (globalId || "");
@@ -564,7 +433,7 @@ function labelSubActividad(x){ return `${x.CodigoSubActividad || ""}${x.NombreSu
 function labelTarea(x){ return `${x.CodigoTarea || ""}${x.NombreTarea ? " — " + x.NombreTarea : ""}`.trim(); }
 function labelPersona(x){ return `${x.Nombre || ""}${x.Cedula ? " - " + x.Cedula : ""}`.trim(); }
 
-/* ===== Query ===== */
+/* ===== Render tabla ===== */
 function buildWhere(key){
   const q = (elSearch?.value || "").trim().replaceAll("'","''");
   const vig = (elVig?.value || "").trim();
@@ -572,10 +441,7 @@ function buildWhere(key){
   if (vig && (FIELDS[key] || []).includes("Vigencia")) parts.push(`Vigencia = ${Number(vig)}`);
 
   if (q){
-    const candidates = [
-      "Nombre","NombreActividad","NombreSubActividad","NombreTarea","PACID","LineaID","ProgramaID","ProyectoID","ObjetivoID","ActividadID",
-      "CodigoSubActividad","CodigoTarea","Cedula","Correo","Dependencia","Fuente","MunicipioNombre","DescripcionSitio","Responsable"
-    ];
+    const candidates = ["Nombre","NombreActividad","NombreSubActividad","NombreTarea","PACID","LineaID","ProgramaID","ProyectoID","ObjetivoID","ActividadID","CodigoSubActividad","CodigoTarea","Cedula","Correo","Dependencia","Fuente","MunicipioNombre","DescripcionSitio","Responsable"];
     const usable = candidates.filter(f => (FIELDS[key] || []).includes(f));
     if (usable.length){
       parts.push("(" + usable.map(f => `${f} LIKE '%${q}%'`).join(" OR ") + ")");
@@ -584,21 +450,14 @@ function buildWhere(key){
   return parts.join(" AND ");
 }
 
-/* ===== Render tabla ===== */
 function renderTable(key, rows){
   const cols = ["__actions", ...(DISPLAY_FIELDS[key] || (FIELDS[key] || []).filter(f=>!shouldHideField(key,f)))];
 
-  elHead.innerHTML = `<tr>${
-    cols.map(c => c==="__actions"
-      ? `<th style="width:210px;">Acciones</th>`
-      : `<th title="${esc(c)}">${esc(labelCol(c))}</th>`
-    ).join("")
-  }</tr>`;
+  elHead.innerHTML = `<tr>${cols.map(c => c==="__actions" ? `<th style="width:210px;">Acciones</th>` : `<th title="${esc(c)}">${esc(labelCol(c))}</th>`).join("")}</tr>`;
 
   elBody.innerHTML = rows.map(r=>{
     const a = r.attributes;
     const oid = a.OBJECTID;
-
     const tds = cols.map(c=>{
       if(c==="__actions"){
         const dis = isReadOnly(key);
@@ -609,8 +468,6 @@ function renderTable(key, rows){
           </div>
         </td>`;
       }
-
-      // Resoluciones (mostrar nombre en vez de GlobalID)
       if (c==="PACGlobalID") return `<td>${esc(lookupByGlobalId(catalogs.CFG_PAC, a.PACGlobalID, labelPAC))}</td>`;
       if (c==="LineaGlobalID") return `<td>${esc(lookupByGlobalId(catalogs.CFG_Linea, a.LineaGlobalID, labelLinea))}</td>`;
       if (c==="ProgramaGlobalID") return `<td>${esc(lookupByGlobalId(catalogs.CFG_Programa, a.ProgramaGlobalID, labelPrograma))}</td>`;
@@ -620,10 +477,7 @@ function renderTable(key, rows){
       if (c==="SubActividadGlobalID") return `<td>${esc(lookupByGlobalId(catalogs.CFG_SubActividad, a.SubActividadGlobalID, labelSubActividad))}</td>`;
       if (c==="TareaGlobalID") return `<td>${esc(lookupByGlobalId(catalogs.CFG_Tarea, a.TareaGlobalID, labelTarea))}</td>`;
       if (c==="PersonaGlobalID") return `<td>${esc(lookupByGlobalId(catalogs.SEG_Persona, a.PersonaGlobalID, labelPersona))}</td>`;
-      if (key==="REP_TareaUbicacion_PT" && c==="AvanceTareaGlobalID"){
-        return `<td>${esc(lookupByGlobalId(catalogs.REP_AvanceTarea, a.AvanceTareaGlobalID, x=>`${x.Vigencia || ""} ${x.Periodo || ""}`.trim()))}</td>`;
-      }
-
+      
       const v = a[c];
       if ((c.startsWith("Fecha") || c.endsWith("Fecha") || c.includes("Fecha")) && v){
         const d = new Date(v);
@@ -631,7 +485,6 @@ function renderTable(key, rows){
       }
       return `<td title="${esc(v)}">${esc(v)}</td>`;
     }).join("");
-
     return `<tr>${tds}</tr>`;
   }).join("");
 
@@ -659,11 +512,7 @@ async function loadEntity(key){
 
   const outFields = ["OBJECTID", ...(FIELDS[key] || [])].join(",");
   const r = await fetchJson(`${entityUrl(key)}/query`, {
-    f:"json",
-    where: buildWhere(key),
-    outFields,
-    orderByFields: "OBJECTID DESC",
-    returnGeometry:"false"
+    f:"json", where: buildWhere(key), outFields, orderByFields: "OBJECTID DESC", returnGeometry:"false"
   });
 
   currentRows = r.features || [];
@@ -681,32 +530,8 @@ function closeModal(){
   btnDelete.style.display = "none";
 }
 
-/* ===== Dominios -> autocomplete ===== */
-function makeDomainAutocomplete(entityKey, fieldName, value, codedValues){
-  const idList = `dl_${entityKey}_${fieldName}`;
-  const maxLen = getMaxLenForField(entityKey, fieldName);
-  const htmlOptions = codedValues.map(cv =>
-    `<option value="${esc(cv.code)}" label="${esc(cv.name)}"></option>`
-  ).join("");
-  const help = HELP_TEXT[fieldName] || "Selecciona del listado.";
-  return `
-    <div class="field">
-      <label>${esc(labelCol(fieldName))}</label>
-      <input type="text" data-field="${esc(fieldName)}" value="${esc(value ?? "")}"
-        list="${idList}" maxlength="${maxLen}" data-maxlen="${maxLen}" />
-      <datalist id="${idList}">${htmlOptions}</datalist>
-      <div class="field__meta"><div class="help-text">${esc(help)}</div><span class="charcount" data-cc-for="${esc(fieldName)}">${maxLen}</span></div>
-    </div>`;
-}
-
-/* ===== Select (FK) ===== */
-function optionsFrom(list, valueField, labelFn){
-  const opts = (list || []).map(x => `<option value="${esc(x[valueField])}">${esc(labelFn(x))}</option>`).join("");
-  return `<option value="">— Selecciona —</option>${opts}`;
-}
-function getCatalogForEntity(entityKey){
-  return catalogs[entityKey] || [];
-}
+/* ===== Inputs & Selects ===== */
+function getCatalogForEntity(entityKey){ return catalogs[entityKey] || []; }
 function getLabelFn(entityKey){
   if (entityKey==="CFG_PAC") return labelPAC;
   if (entityKey==="CFG_Linea") return labelLinea;
@@ -724,56 +549,49 @@ function getLabelFn(entityKey){
 function makeSelectField(entityKey, fieldName, targetEntity, currentValue){
   const list = getCatalogForEntity(targetEntity);
   const labelFn = getLabelFn(targetEntity);
-  const opts = optionsFrom(list, "GlobalID", labelFn);
-
+  const opts = list.map(x => `<option value="${esc(x.GlobalID)}" ${String(currentValue)===String(x.GlobalID)?"selected":""}>${esc(labelFn(x))}</option>`).join("");
   return `
     <div class="field">
-      <label>${esc(labelCol(fieldName))}</label>
-      <select data-field="${esc(fieldName)}" data-fk="1">${opts}</select>
-      <div class="field__meta"><div class="help-text">Selecciona el registro relacionado (no se digita).</div><span></span></div>
+      <label>${esc(labelCol(fieldName))} *</label>
+      <select data-field="${esc(fieldName)}" data-fk="1">
+        <option value="">— Selecciona —</option>${opts}
+      </select>
+      <div class="field__meta"><div class="help-text">Selecciona el registro relacionado.</div><span></span></div>
     </div>`;
 }
-function setSelectValue(fieldName, value){
-  const sel = formDyn.querySelector(`select[data-field="${CSS.escape(fieldName)}"]`);
-  if (sel) sel.value = value ?? "";
-}
 
-/* ===== Input general (oculta GUID/GlobalID) ===== */
 function makeInput(entityKey, fieldName, value){
   const ui = FIELD_UI[fieldName] || { type:"text" };
   const help = HELP_TEXT[fieldName] || "";
   const maxLen = getMaxLenForField(entityKey, fieldName);
 
-  // Select FK (jerarquía + extra)
-  const selectRule = SELECT_RULES?.[entityKey]?.[fieldName];
-  if (selectRule?.entity){
-    return makeSelectField(entityKey, fieldName, selectRule.entity, value);
-  }
-
-  // GUID/GlobalID: oculto
   if (shouldHideField(entityKey, fieldName)){
-    const v = value ?? "";
-    return `<input type="hidden" data-field="${esc(fieldName)}" value="${esc(v)}" />`;
+    return `<input type="hidden" data-field="${esc(fieldName)}" value="${esc(value ?? "")}" />`;
   }
 
-  // dominio codedValue
-  const coded = metaCache[entityKey]?.domainsByField?.[fieldName];
-  if (coded && (ui.type === "text" || ui.type === "email" || ui.type === undefined)){
-    return makeDomainAutocomplete(entityKey, fieldName, value, coded);
-  }
+  const selectRule = SELECT_RULES?.[entityKey]?.[fieldName];
+  if (selectRule?.entity) return makeSelectField(entityKey, fieldName, selectRule.entity, value);
 
-  // select normal
-  if(ui.type==="select"){
-    const opts = (ui.values||[]).map(v => `<option value="${esc(v)}" ${String(value)===String(v)?"selected":""}>${esc(v)}</option>`).join("");
+  // **MEJORA: Dominios como <select> estrictos**
+  const codedValues = metaCache[entityKey]?.domainsByField?.[fieldName];
+  if (codedValues || ui.type === "select") {
+    let opts = "";
+    if (codedValues) {
+      opts = codedValues.map(cv => `<option value="${esc(cv.code)}" ${String(value)===String(cv.code)?"selected":""}>${esc(cv.name)}</option>`).join("");
+    } else {
+      opts = (ui.values||[]).map(v => `<option value="${esc(v)}" ${String(value)===String(v)?"selected":""}>${esc(v)}</option>`).join("");
+    }
     return `
       <div class="field">
-        <label>${esc(labelCol(fieldName))}</label>
-        <select data-field="${esc(fieldName)}">${opts}</select>
-        <div class="field__meta"><div class="help-text">${esc(help)}</div><span></span></div>
+        <label>${esc(labelCol(fieldName))} *</label>
+        <select data-field="${esc(fieldName)}">
+          <option value="">— Selecciona —</option>
+          ${opts}
+        </select>
+        <div class="field__meta"><div class="help-text">${esc(help || "Selecciona una opción.")}</div><span></span></div>
       </div>`;
   }
 
-  // textarea
   if(["Definicion","ObservacionesPlaneacion","TextoNarrativo","PrincipalesLogros","DescripcionLogrosAlcanzados","Observaciones","EvidenciaURL","DescripcionSitio"].includes(fieldName)){
     return `
       <div class="field">
@@ -783,29 +601,27 @@ function makeInput(entityKey, fieldName, value){
       </div>`;
   }
 
-  // number attrs
+  const isWeight = fieldName === "Peso" || fieldName === "PesoSubActividad" || fieldName === "PesoTarea";
   const attrs=[];
   if(ui.min!==undefined) attrs.push(`min="${ui.min}"`);
   if(ui.max!==undefined) attrs.push(`max="${ui.max}"`);
   if(ui.step!==undefined) attrs.push(`step="${ui.step}"`);
 
-  const showCounter = (ui.type === "text" || ui.type === "email");
+  const showCounter = (ui.type === "text" || ui.type === "email" || ui.type === undefined);
   return `
     <div class="field">
-      <label>${esc(labelCol(fieldName))}</label>
+      <label>${esc(labelCol(fieldName))} *</label>
       <input ${attrs.join(" ")} type="${ui.type || "text"}" data-field="${esc(fieldName)}" value="${esc(value ?? "")}"
         ${showCounter ? `maxlength="${maxLen}" data-maxlen="${maxLen}"` : ""} />
       <div class="field__meta">
         <div class="help-text">${esc(help)}</div>
-        ${showCounter ? `<span class="charcount" data-cc-for="${esc(fieldName)}">${maxLen}</span>` : `<span></span>`}
+        ${isWeight ? `<span class="weight-helper" style="font-weight:900; color:var(--primary-2);"></span>` : (showCounter ? `<span class="charcount" data-cc-for="${esc(fieldName)}">${maxLen}</span>` : `<span></span>`)}
       </div>
     </div>`;
 }
 
-/* contador */
 function wireCharCounters(){
-  const inputs = formDyn.querySelectorAll('input[data-maxlen], textarea[data-maxlen]');
-  inputs.forEach(inp=>{
+  formDyn.querySelectorAll('input[data-maxlen], textarea[data-maxlen]').forEach(inp=>{
     const field = inp.getAttribute("data-field");
     const max = Number(inp.getAttribute("data-maxlen")) || 0;
     const badge = formDyn.querySelector(`.charcount[data-cc-for="${CSS.escape(field)}"]`);
@@ -822,7 +638,76 @@ function wireCharCounters(){
   });
 }
 
-/* ===== Open modal ===== */
+/* **MEJORA: Ayuda visual para la suma de pesos** */
+async function updateWeightHelper(entityKey) {
+  const rule = PARENT_RULES[entityKey];
+  if (!rule || !rule.weightField) return;
+
+  const helperSpan = formDyn.querySelector('.weight-helper');
+  const parentSelect = formDyn.querySelector(`select[data-field="${rule.parentField}"]`);
+  if (!helperSpan || !parentSelect) return;
+
+  const parentVal = parentSelect.value;
+  if (!parentVal) {
+      helperSpan.textContent = "Selecciona el registro padre primero.";
+      return;
+  }
+
+  const vigInput = formDyn.querySelector(`[data-field="Vigencia"]`);
+  const vig = vigInput ? vigInput.value : (elVig?.value || null);
+
+  const whereParts = [`${rule.parentField} = '${String(parentVal).replaceAll("'", "''")}'`];
+  if ((FIELDS[entityKey] || []).includes("Vigencia") && vig) whereParts.push(`Vigencia = ${Number(vig)}`);
+
+  try {
+      const r = await fetchJson(`${entityUrl(entityKey)}/query`, {
+          f:"json", where: whereParts.join(" AND "), outFields: `OBJECTID,${rule.weightField}`, returnGeometry:"false"
+      });
+      const list = (r.features || []).map(f => f.attributes);
+      const myOID = editingRow?.attributes?.OBJECTID ?? null;
+
+      const sumExisting = list.reduce((acc, x)=>{
+          if (myOID && x.OBJECTID === myOID) return acc;
+          const w = Number(x[rule.weightField]);
+          return acc + (isFinite(w) ? w : 0);
+      }, 0);
+
+      const remaining = Math.max(0, 100 - sumExisting);
+      helperSpan.textContent = `Disponible: ${remaining.toFixed(2)}% (Ocupado: ${sumExisting.toFixed(2)}%)`;
+      helperSpan.style.color = remaining <= 0 ? "#dc2626" : "var(--primary-2)";
+  } catch(e) {
+      helperSpan.textContent = "Calculando...";
+  }
+}
+
+/* **MEJORA: Auto-llenado de ID Textual basado en GUID Seleccionado** */
+function wireSelectDependencies(entityKey) {
+  formDyn.querySelectorAll('select[data-fk="1"]').forEach(sel => {
+      sel.addEventListener('change', (e) => {
+          const globalId = e.target.value;
+          const fieldName = sel.getAttribute('data-field');
+          
+          // Buscar si hay un campo de texto equivalente (ej. PACGlobalID -> PACID)
+          const stringIdField = fieldName.replace("GlobalID", "ID");
+          const inputStringId = formDyn.querySelector(`[data-field="${stringIdField}"]`);
+
+          if (inputStringId && globalId) {
+              const targetEntity = SELECT_RULES[entityKey][fieldName].entity;
+              const parentObj = catalogs[targetEntity].find(x => String(x.GlobalID) === String(globalId));
+              if (parentObj && parentObj[stringIdField]) {
+                  inputStringId.value = parentObj[stringIdField];
+                  inputStringId.dispatchEvent(new Event('input')); // disparar contador
+              }
+          }
+          
+          updateWeightHelper(entityKey); // Actualizar helper de peso si cambia el padre
+      });
+  });
+
+  const vigField = formDyn.querySelector(`[data-field="Vigencia"]`);
+  if (vigField) vigField.addEventListener('change', () => updateWeightHelper(entityKey));
+}
+
 async function openModalNew(entityKey){
   if (isReadOnly(entityKey)) return;
   editingRow = null;
@@ -833,14 +718,9 @@ async function openModalNew(entityKey){
   modalSubtitle.textContent = FRIENDLY_DESC[entityKey] || "Completa los campos y guarda.";
   btnDelete.style.display = "none";
 
-  const inputs = (FIELDS[entityKey] || [])
-    .filter(f => !["GlobalID"].includes(f)) // GlobalID se lo asigna AGOL
-    .map(f => makeInput(entityKey, f, ""))
-    .join("");
-
+  const inputs = (FIELDS[entityKey] || []).filter(f => !["GlobalID"].includes(f)).map(f => makeInput(entityKey, f, "")).join("");
   formDyn.innerHTML = `<div class="formgrid">${inputs}</div>`;
 
-  // defaults
   const vigField = formDyn.querySelector(`[data-field="Vigencia"]`);
   if (vigField && elVig.value) vigField.value = elVig.value;
 
@@ -851,6 +731,8 @@ async function openModalNew(entityKey){
   if (aplicaField && !aplicaField.value) aplicaField.value = "SI";
 
   wireCharCounters();
+  wireSelectDependencies(entityKey);
+  updateWeightHelper(entityKey);
   openModal();
 }
 
@@ -864,33 +746,23 @@ async function openModalEdit(entityKey, row){
   modalSubtitle.textContent = "Actualiza y guarda los cambios.";
   btnDelete.style.display = "inline-flex";
 
-  const inputs = (FIELDS[entityKey] || [])
-    .filter(f => !["GlobalID"].includes(f))
-    .map(f => makeInput(entityKey, f, row.attributes[f]))
-    .join("");
+  const inputs = (FIELDS[entityKey] || []).filter(f => !["GlobalID"].includes(f)).map(f => makeInput(entityKey, f, row.attributes[f])).join("");
   formDyn.innerHTML = `<div class="formgrid">${inputs}</div>`;
 
-  // set selects
-  formDyn.querySelectorAll("select[data-field]").forEach(sel=>{
-    const f = sel.getAttribute("data-field");
-    setSelectValue(f, row.attributes[f]);
-  });
-
   wireCharCounters();
+  wireSelectDependencies(entityKey);
+  updateWeightHelper(entityKey);
   openModal();
 }
 
 /* ===== Validaciones ===== */
-function validateDomainValue(entityKey, fieldName, value){
-  const codedValues = metaCache[entityKey]?.domainsByField?.[fieldName];
-  if (!codedValues) return;
-  if (value === null || value === undefined || value === "") return;
-  const ok = codedValues.some(cv => String(cv.code) === String(value));
-  if (!ok) throw new Error(`El campo "${labelCol(fieldName)}" debe seleccionarse del listado (dominio).`);
-}
-
+/* **MEJORA: Campos estrictamente obligatorios** */
 function readForm(entityKey){
   const a = {};
+  
+  // Campos que permitiremos dejar vacíos por diseño
+  const optionalFields = ["Observaciones", "ObservacionesPlaneacion", "Definicion", "TextoNarrativo", "PrincipalesLogros", "DescripcionLogrosAlcanzados", "EvidenciaURL", "DescripcionSitio"];
+
   formDyn.querySelectorAll("[data-field]").forEach(el=>{
     const f = el.getAttribute("data-field");
     let v = el.value;
@@ -903,81 +775,55 @@ function readForm(entityKey){
 
     if (v==="") v = null;
     a[f] = v;
+
+    // Validación de obligatoriedad
+    if ((v === null || v === "") && !optionalFields.includes(f) && !shouldHideField(entityKey, f)) {
+        throw new Error(`El campo "${labelCol(f)}" es obligatorio.`);
+    }
   });
-
-  // FK requerido (si es select)
-  formDyn.querySelectorAll('select[data-fk="1"]').forEach(sel=>{
-    const f = sel.getAttribute("data-field");
-    if (!a[f]) throw new Error(`Debes seleccionar ${labelCol(f)} (registro relacionado).`);
-  });
-
-  // PK lógico requerido (cuando aplica) para evitar registros sin código
-  const pk = ENTITY[entityKey].pk;
-  if (!editingRow && pk && !isGuidLikeField(entityKey, pk) && !a[pk]){
-    // solo exigir si el campo está en el form (no es oculto)
-    const inForm = !!formDyn.querySelector(`[data-field="${CSS.escape(pk)}"]`);
-    if (inForm) throw new Error(`El campo ${labelCol(pk)} es obligatorio.`);
-  }
-
-  // dominios
-  Object.keys(a).forEach(fn => validateDomainValue(entityKey, fn, a[fn]));
 
   return a;
 }
 
 async function validateUnique(entityKey, attrs){
   const rules = UNIQUE_RULES.filter(r => r.entity === entityKey);
-  if (!rules.length) return;
-
   for (const r of rules){
     const field = r.field;
     const val = attrs[field];
     if (!val) continue;
 
     const parts = [`${field} = '${String(val).replaceAll("'", "''")}'`];
-
     for (const s of (r.scope || [])){
       const sv = attrs[s];
       if (sv !== null && sv !== undefined) parts.push(`${s} = '${String(sv).replaceAll("'", "''")}'`);
     }
 
     const qr = await fetchJson(`${entityUrl(entityKey)}/query`, {
-      f:"json",
-      where: parts.join(" AND "),
-      outFields: "OBJECTID",
-      returnGeometry: "false"
+      f:"json", where: parts.join(" AND "), outFields: "OBJECTID", returnGeometry: "false"
     });
 
     const hits = (qr.features || []).map(f => f.attributes.OBJECTID);
     const myOID = editingRow?.attributes?.OBJECTID ?? null;
 
-    const exists = hits.some(oid => myOID ? oid !== myOID : true);
-    if (exists) throw new Error(`Ya existe un registro con ${labelCol(field)} = "${val}". Verifica duplicados.`);
+    if (hits.some(oid => myOID ? oid !== myOID : true)) {
+        throw new Error(`Ya existe un registro con ${labelCol(field)} = "${val}". Verifica duplicados.`);
+    }
   }
 }
 
 async function validateWeightSum(entityKey, attrs){
   const rule = PARENT_RULES[entityKey];
-  if (!rule) return;
+  if (!rule || !rule.weightField || attrs[rule.weightField] === null || attrs[rule.weightField] === undefined) return;
 
-  const { parentField, weightField } = rule;
-  if (!weightField) return;
-  if (attrs[weightField] === null || attrs[weightField] === undefined) return;
-
-  const parentVal = attrs[parentField];
+  const parentVal = attrs[rule.parentField];
   if (!parentVal) return;
 
   const vig = attrs.Vigencia ?? (elVig?.value ? Number(elVig.value) : null);
-
-  const whereParts = [`${parentField} = '${String(parentVal).replaceAll("'", "''")}'`];
+  const whereParts = [`${rule.parentField} = '${String(parentVal).replaceAll("'", "''")}'`];
   if ((FIELDS[entityKey] || []).includes("Vigencia") && vig) whereParts.push(`Vigencia = ${Number(vig)}`);
-  const where = whereParts.join(" AND ");
 
   const r = await fetchJson(`${entityUrl(entityKey)}/query`, {
-    f:"json",
-    where,
-    outFields: `OBJECTID,${weightField}`,
-    returnGeometry:"false"
+    f:"json", where: whereParts.join(" AND "), outFields: `OBJECTID,${rule.weightField}`, returnGeometry:"false"
   });
 
   const list = (r.features || []).map(f => f.attributes);
@@ -985,47 +831,29 @@ async function validateWeightSum(entityKey, attrs){
 
   const sumExisting = list.reduce((acc, x)=>{
     if (myOID && x.OBJECTID === myOID) return acc;
-    const w = Number(x[weightField]);
+    const w = Number(x[rule.weightField]);
     return acc + (isFinite(w) ? w : 0);
   }, 0);
 
-  const newW = Number(attrs[weightField]);
+  const newW = Number(attrs[rule.weightField]);
   const total = sumExisting + (isFinite(newW) ? newW : 0);
 
   if (total > 100.000001){
     const remaining = Math.max(0, 100 - sumExisting);
-    throw new Error(
-      `El ${labelCol(weightField)} excede el 100% para este padre.\n` +
-      `Suma actual (sin este registro): ${sumExisting}\n` +
-      `Disponible: ${remaining}\n` +
-      `Intentas guardar: ${newW}`
-    );
+    throw new Error(`El peso supera el 100%. Te queda disponible: ${remaining.toFixed(2)}%. Intentas subir: ${newW}%`);
   }
 }
 
-function getRowGlobalID(entityKey, row){
-  return row?.attributes?.GlobalID ?? null;
-}
-
 async function validateDeleteHasChildren(entityKey, row){
-  const parentGID = getRowGlobalID(entityKey, row);
+  const parentGID = row?.attributes?.GlobalID ?? null;
   if (!parentGID) return;
 
   const rules = CHILDREN_RULES.filter(r => r.parent === entityKey);
   for (const rr of rules){
-    const child = rr.child;
-    const fk = rr.fk;
-
-    const r = await fetchJson(`${entityUrl(child)}/query`, {
-      f:"json",
-      where: `${fk} = '${String(parentGID).replaceAll("'", "''")}'`,
-      outFields: "OBJECTID",
-      returnGeometry:"false"
+    const r = await fetchJson(`${entityUrl(rr.child)}/query`, {
+      f:"json", where: `${rr.fk} = '${String(parentGID).replaceAll("'", "''")}'`, outFields: "OBJECTID", returnGeometry:"false"
     });
-
-    if ((r.features || []).length > 0){
-      throw new Error(`No se puede eliminar: existen registros hijos en ${FRIENDLY[child]} (relación ${labelCol(fk)}).`);
-    }
+    if ((r.features || []).length > 0) throw new Error(`No se puede eliminar: existen registros hijos vinculados.`);
   }
 }
 
@@ -1058,12 +886,10 @@ async function save(entityKey){
 
 async function del(entityKey, row){
   if (isReadOnly(entityKey)) return;
-
   await validateDeleteHasChildren(entityKey, row);
 
   const url = `${entityUrl(entityKey)}/applyEdits`;
-  const oid = row.attributes.OBJECTID;
-  const res = await postForm(url, { f:"json", deletes:String(oid) });
+  const res = await postForm(url, { f:"json", deletes:String(row.attributes.OBJECTID) });
   if (res?.error) throw new Error(res.error.message || "Error al eliminar.");
   if (!(res.deleteResults||[]).every(x=>x.success)) throw new Error("No se eliminó correctamente.");
 
@@ -1080,32 +906,26 @@ function confirmDelete(entityKey, row){
     try{
       btnDelete.disabled = true;
       await del(entityKey, row);
-    }catch(e){
-      console.error(e);
-      setStatus(e.message || "Error eliminando.","error");
-    }finally{
-      btnDelete.disabled = false;
-    }
+    }catch(e){ setStatus(e.message || "Error eliminando.","error"); }
+    finally{ btnDelete.disabled = false; }
   };
 }
 
-/* ===== Nav ===== */
+/* ===== Boot y Nav ===== */
 function wireNav(){
   document.querySelectorAll(".navitem").forEach(btn=>{
     btn.addEventListener("click", async ()=>{
       document.querySelectorAll(".navitem").forEach(b=>b.classList.remove("is-active"));
       btn.classList.add("is-active");
-
       const key = btn.getAttribute("data-entity");
-      if(!key || !ENTITY[key]) return;
-
-      closeDrawer();
-      await loadEntity(key);
+      if(key && ENTITY[key]){
+          closeDrawer();
+          await loadEntity(key);
+      }
     });
   });
 }
 
-/* ===== Boot ===== */
 (async function main(){
   try{
     ensureOverlay();
@@ -1116,12 +936,10 @@ function wireNav(){
       setStatus("Recargando…");
       await loadCatalogs();
       await loadEntity(currentEntityKey);
-      setStatus("Listo.","success");
     });
 
     btnNew.addEventListener("click", async ()=>{
-      if (isReadOnly(currentEntityKey)) return;
-      await openModalNew(currentEntityKey);
+      if (!isReadOnly(currentEntityKey)) await openModalNew(currentEntityKey);
     });
 
     btnClose.addEventListener("click", closeModal);
@@ -1139,21 +957,15 @@ function wireNav(){
       }
     });
 
-    elSearch.addEventListener("input", debounce(async ()=>{
-      await loadEntity(currentEntityKey);
-    }, 250));
-
+    elSearch.addEventListener("input", debounce(async ()=> await loadEntity(currentEntityKey), 250));
     elVig.addEventListener("change", async ()=>{
       await loadCatalogs();
       await loadEntity(currentEntityKey);
     });
 
-    // init
     await loadEntityMetadata(currentEntityKey);
     await loadCatalogs();
     await loadEntity(currentEntityKey);
-
-    setStatus("Listo.","success");
   }catch(e){
     console.error(e);
     setStatus("Error inicializando la administración.","error");
