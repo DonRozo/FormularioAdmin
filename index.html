@@ -3,148 +3,89 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>DATA-PAC | Administradores OAP</title>
-
+  <title>DATA-PAC | Administración V3</title>
   <link rel="stylesheet" href="style.css" />
 </head>
-
 <body>
-  <div class="app">
-    <!-- Header estilo “reporte” -->
+
+  <div id="otp-overlay" class="otp-overlay">
+    <div class="otp-card">
+      <div class="brand" style="justify-content: center; margin-bottom: 20px;">
+        <div class="brand__dot"></div>
+        <div class="brand__text"><div class="brand__title" style="font-size:22px;">DATA-PAC V3</div></div>
+      </div>
+      
+      <div id="otp-step-1" class="otp-step">
+        <p class="muted" style="text-align:center; margin-bottom:20px;">Ingresa tus credenciales para recibir el código de acceso.</p>
+        <div class="field">
+          <label>Cédula</label>
+          <input type="text" id="inp-cedula" placeholder="Ej: 10203040" />
+        </div>
+        <div class="field">
+          <label>Correo Electrónico</label>
+          <input type="email" id="inp-correo" placeholder="usuario@car.gov.co" />
+        </div>
+        <button class="btn btn--primary" id="btn-request-otp" style="width:100%; margin-top:10px;">Solicitar Código</button>
+      </div>
+
+      <div id="otp-step-2" class="otp-step is-hidden">
+        <p class="muted" style="text-align:center; margin-bottom:20px;">Ingresa el código OTP enviado a tu correo.</p>
+        <div class="field">
+          <label>Código OTP (Últimos 4 caracteres)</label>
+          <input type="text" id="inp-codigo" placeholder="Ej: A8F2" maxlength="10" style="text-align:center; font-size:18px; letter-spacing:4px; text-transform:uppercase;" />
+        </div>
+        <button class="btn btn--primary" id="btn-verify-otp" style="width:100%; margin-top:10px;">Verificar e Ingresar</button>
+        <button class="btn btn--ghost" id="btn-back-otp" style="width:100%; margin-top:10px;">Volver</button>
+      </div>
+
+      <div id="otp-status" class="status" style="text-align:center; margin-top:14px;"></div>
+    </div>
+  </div>
+
+  <div class="app" id="app-main" style="display:none;">
     <header class="topbar">
       <div class="brand">
         <div class="brand__dot"></div>
         <div class="brand__text">
           <div class="brand__title">DATA-PAC</div>
-          <div class="brand__subtitle">Administración OAP • Catálogos, Planeación y Seguridad</div>
+          <div class="brand__subtitle">Administración OAP V3</div>
         </div>
       </div>
-
       <div class="topbar__right">
-        <div class="pill" id="pill-service">Servicio: DATAPAC_V2</div>
+        <div class="pill" id="pill-user">Usuario: —</div>
+        <div class="pill" id="pill-service">Servicio: V3</div>
+        <button class="btn btn--ghost" id="btn-tables" style="display:none;">☰ Tablas</button>
         <button class="btn btn--ghost" id="btn-reload">Recargar</button>
       </div>
     </header>
 
-    <!-- Layout 2 columnas real -->
     <main class="layout layout--admin2">
-      <!-- Menú izquierdo -->
       <aside class="panel panel--nav2" aria-label="Menú">
         <div class="panel__header">
-          <h2>Tablas</h2>
-          <p class="muted">Selecciona una tabla para administrar su información.</p>
+          <h2>Módulos</h2>
+          <p class="muted">Filtrados por rol y alcance.</p>
         </div>
-
-        <div class="navlist" id="navlist">
-          <!-- Estructura jerárquica -->
-          <button class="navitem is-active" data-entity="CFG_PAC">
-            <span class="navitem__title" data-label="CFG_PAC">PAC</span>
-            <span class="navitem__meta">Estructura</span>
-          </button>
-
-          <div class="navgroup">Estructura PAC</div>
-          <button class="navitem" data-entity="CFG_Linea">
-            <span class="navitem__title" data-label="CFG_Linea">Líneas</span>
-            <span class="navitem__meta">Estructura</span>
-          </button>
-          <button class="navitem" data-entity="CFG_Programa">
-            <span class="navitem__title" data-label="CFG_Programa">Programas</span>
-            <span class="navitem__meta">Estructura</span>
-          </button>
-          <button class="navitem" data-entity="CFG_Proyecto">
-            <span class="navitem__title" data-label="CFG_Proyecto">Proyectos</span>
-            <span class="navitem__meta">Estructura</span>
-          </button>
-          <button class="navitem" data-entity="CFG_Objetivo">
-            <span class="navitem__title" data-label="CFG_Objetivo">Objetivos</span>
-            <span class="navitem__meta">Estructura</span>
-          </button>
-          <button class="navitem" data-entity="CFG_Actividad">
-            <span class="navitem__title" data-label="CFG_Actividad">Actividades</span>
-            <span class="navitem__meta">Estructura</span>
-          </button>
-          <button class="navitem" data-entity="CFG_SubActividad">
-            <span class="navitem__title" data-label="CFG_SubActividad">Subactividades</span>
-            <span class="navitem__meta">Estructura</span>
-          </button>
-          <button class="navitem" data-entity="CFG_Tarea">
-            <span class="navitem__title" data-label="CFG_Tarea">Tareas</span>
-            <span class="navitem__meta">Estructura</span>
-          </button>
-
-          <div class="navgroup">Planeación por vigencia</div>
-          <button class="navitem" data-entity="PLAN_SubActividadVigencia">
-            <span class="navitem__title" data-label="PLAN_SubActividadVigencia">Plan Subactividad</span>
-            <span class="navitem__meta">Planeación</span>
-          </button>
-          <button class="navitem" data-entity="PLAN_TareaVigencia">
-            <span class="navitem__title" data-label="PLAN_TareaVigencia">Plan Tarea</span>
-            <span class="navitem__meta">Planeación</span>
-          </button>
-
-          <div class="navgroup">Seguridad y asignaciones</div>
-          <button class="navitem" data-entity="SEG_Persona">
-            <span class="navitem__title" data-label="SEG_Persona">Personas</span>
-            <span class="navitem__meta">Seguridad</span>
-          </button>
-          <button class="navitem" data-entity="SEG_Asignacion">
-            <span class="navitem__title" data-label="SEG_Asignacion">Asignaciones</span>
-            <span class="navitem__meta">Seguridad</span>
-          </button>
-          <button class="navitem" data-entity="SEG_OTP">
-            <span class="navitem__title" data-label="SEG_OTP">OTP (auditoría)</span>
-            <span class="navitem__meta">Seguridad</span>
-          </button>
-
-          <div class="navgroup">Consulta (solo lectura)</div>
-          <button class="navitem" data-entity="FIN_ResumenTodoGastoActividad">
-            <span class="navitem__title" data-label="FIN_ResumenTodoGastoActividad">Resumen TodoGasto</span>
-            <span class="navitem__meta">Financiero</span>
-          </button>
-          <button class="navitem" data-entity="FIN_TodoGasto">
-            <span class="navitem__title" data-label="FIN_TodoGasto">TodoGasto (detalle)</span>
-            <span class="navitem__meta">Financiero</span>
-          </button>
-          <button class="navitem" data-entity="REP_ReporteNarrativo">
-            <span class="navitem__title" data-label="REP_ReporteNarrativo">Reporte narrativo</span>
-            <span class="navitem__meta">Reporte</span>
-          </button>
-          <button class="navitem" data-entity="REP_AvanceTarea">
-            <span class="navitem__title" data-label="REP_AvanceTarea">Avance de tarea</span>
-            <span class="navitem__meta">Reporte</span>
-          </button>
-          <button class="navitem" data-entity="REP_TareaUbicacion_PT">
-            <span class="navitem__title" data-label="REP_TareaUbicacion_PT">Ubicaciones</span>
-            <span class="navitem__meta">Geografía</span>
-          </button>
-        </div>
-
-        <div class="footer footer--panel">
-          <span class="muted">Tip: En formularios, los campos GlobalID/GUID están ocultos y las relaciones se seleccionan por listas.</span>
-        </div>
+        <div class="navlist" id="navlist"></div>
+        <div class="footer footer--panel"><span class="muted">Restricciones activas según SEG_Alcance y SEG_Asignacion.</span></div>
       </aside>
 
-      <!-- Contenido derecho (listado + acciones arriba) -->
       <section class="panel panel--content2" aria-label="Contenido">
         <div class="panel__header panel__header--content">
           <div>
-            <h2 id="h-entity">PAC</h2>
-            <p class="muted" id="p-entity">Administra los registros de la tabla seleccionada.</p>
+            <h2 id="h-entity">Selecciona un módulo</h2>
+            <p class="muted" id="p-entity">El sistema aplicará tus permisos funcionales.</p>
           </div>
-
           <div class="toolbar">
             <input class="inp-search" id="txt-search" type="search" placeholder="Buscar…" />
             <select id="sel-vigencia" class="sel-small" title="Vigencia">
-              <option value="">Todas</option>
+              <option value="">Vigencia: Todas</option>
               <option value="2024">2024</option>
               <option value="2025">2025</option>
               <option value="2026" selected>2026</option>
-              <option value="2027">2027</option>
             </select>
-            <button class="btn btn--primary" id="btn-new">+ Nuevo registro</button>
+            <button class="btn btn--primary" id="btn-new" style="display:none;">+ Nuevo registro</button>
           </div>
         </div>
-
         <div class="content">
           <div class="tablewrap">
             <table class="tbl" id="tbl">
@@ -152,13 +93,11 @@
               <tbody id="tbl-body"></tbody>
             </table>
           </div>
-
           <div class="status" id="status" role="status" aria-live="polite"></div>
         </div>
       </section>
     </main>
 
-    <!-- Modal -->
     <div class="modal" id="modal" aria-hidden="true">
       <div class="modal__card" role="dialog" aria-modal="true" aria-label="Formulario">
         <div class="modal__head">
@@ -168,13 +107,11 @@
           </div>
           <button class="btn btn--ghost" id="btn-close">Cerrar</button>
         </div>
-
         <div class="modal__body">
           <div id="form-dynamic"></div>
         </div>
-
         <div class="modal__foot">
-          <div class="muted" id="modal-hint">Validación básica y relaciones.</div>
+          <div class="muted" id="modal-hint">Auditoría: Tus acciones quedarán registradas.</div>
           <div class="modal__actions">
             <button class="btn btn--danger" id="btn-delete" style="display:none;">Eliminar</button>
             <button class="btn btn--primary" id="btn-save">Guardar</button>
@@ -182,10 +119,6 @@
         </div>
       </div>
     </div>
-
-    <footer class="footer">
-      <span class="muted">Admin UI • DATA-PAC</span>
-    </footer>
   </div>
 
   <script src="script.js"></script>
