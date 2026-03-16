@@ -3,7 +3,7 @@
    - OTP Auth, RBAC Múltiple, Herencia SEG_Alcance, Asignaciones
    =========================================================== */
 
-const SERVICE_URL = "https://services6.arcgis.com/yq6pe3Lw2oWFjWtF/arcgis/rest/services/DATAPAC_V2/FeatureServer";
+const SERVICE_URL = "https://services6.arcgis.com/yq6pe3Lw2oWFjWtF/arcgis/rest/services/DATAPAC_V3/FeatureServer";
 
 /* ===== Entidades V3 ===== */
 const ENTITY = {
