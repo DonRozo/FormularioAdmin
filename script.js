@@ -1,6 +1,6 @@
 /* ===========================================================
    DATA-PAC | Admin OAP V3 (script.js)
-   - OTP Auth, RBAC, Sorting, Formularios Reales, Pesos
+   - OTP Auth, RBAC, Sorting, Formularios Reales, Pesos, Auto-cálculo IDs
    =========================================================== */
 
 const SERVICE_URL = "https://services6.arcgis.com/yq6pe3Lw2oWFjWtF/arcgis/rest/services/DATAPAC_V3/FeatureServer";
@@ -17,13 +17,13 @@ const ENTITY = {
 
 const HARD_READONLY = new Set(["AUD_HistorialCambio", "AUD_EventoSistema", "BI_AvanceActividad", "BI_AvanceObjetivo", "BI_AvanceProyecto", "BI_AvancePrograma", "BI_AvanceLinea", "BI_AvancePAC", "FIN_TodoGasto", "FIN_ResumenTodoGastoActividad", "REP_AvanceSubActividad", "REP_AvanceActividad", "SEG_OTP"]);
 
-// Reglas V2 Restauradas
+// Reglas V2 Restauradas y mejoradas con parentText (para auto-cálculo)
 const PARENT_RULES = {
-  CFG_Linea: { fk: "PACGlobalID", parent: "CFG_PAC", weight: "Peso" },
-  CFG_Programa: { fk: "LineaGlobalID", parent: "CFG_Linea", weight: "Peso" },
-  CFG_Proyecto: { fk: "ProgramaGlobalID", parent: "CFG_Programa", weight: "Peso" },
-  CFG_Objetivo: { fk: "ProyectoGlobalID", parent: "CFG_Proyecto", weight: "Peso" },
-  CFG_Actividad: { fk: "ObjetivoGlobalID", parent: "CFG_Objetivo", weight: "Peso" },
+  CFG_Linea: { fk: "PACGlobalID", parent: "CFG_PAC", weight: "Peso", parentText: "PACID" },
+  CFG_Programa: { fk: "LineaGlobalID", parent: "CFG_Linea", weight: "Peso", parentText: "LineaID" },
+  CFG_Proyecto: { fk: "ProgramaGlobalID", parent: "CFG_Programa", weight: "Peso", parentText: "ProgramaID" },
+  CFG_Objetivo: { fk: "ProyectoGlobalID", parent: "CFG_Proyecto", weight: "Peso", parentText: "ProyectoID" },
+  CFG_Actividad: { fk: "ObjetivoGlobalID", parent: "CFG_Objetivo", weight: "Peso", parentText: "ObjetivoID" },
   PLAN_SubActividadVigencia: { fk: "SubActividadGlobalID", parent: "CFG_SubActividad", weight: "PesoSubActividad" },
   PLAN_TareaVigencia: { fk: "TareaGlobalID", parent: "CFG_Tarea", weight: "PesoTarea" }
 };
@@ -44,7 +44,7 @@ const CHILDREN_RULES = [
 /* ===== Estado ===== */
 const SESSION = { personaID: null, personaGlobalID: null, nombre: null, roles: [], isSuperAdmin: false, isVisualizador: false, maxPerm: "Ver", allowedGuids: {}, assignedTasks: new Set(), tablePermissions: {} };
 let currentEntityKey = null, currentRows = [], editingRow = null, metaCache = {}, catalogs = {};
-let currentSort = { col: null, dir: 0 }; // 0: none, 1: asc, -1: desc
+let currentSort = { col: null, dir: 0 }; 
 
 const uiApp = document.getElementById("app-main"), elStatus = document.getElementById("status"), elOtpStatus = document.getElementById("otp-status"), modal = document.getElementById("modal"), formDyn = document.getElementById("form-dynamic");
 
@@ -56,7 +56,7 @@ function setStatus(msg, type="info", isOtp=false){
 function esc(s){ return (s??"").toString().replaceAll("<","&lt;").replaceAll(">","&gt;"); }
 function entityUrl(key){ return `${SERVICE_URL}/${ENTITY[key].id}`; }
 function isReadOnly(key){ return HARD_READONLY.has(key) || !hasWritePermission(key); }
-function canDelete(){ return SESSION.isSuperAdmin; } // Borrado exclusivo Superadmin
+function canDelete(){ return SESSION.isSuperAdmin; } 
 function generateGUID() { return '{' + crypto.randomUUID().toUpperCase() + '}'; }
 
 async function fetchJson(url, params){
@@ -228,10 +228,7 @@ async function getMeta(key){
   const m = await fetchJson(`${entityUrl(key)}?f=pjson`);
   const fieldsByName = {}, domainsByField = {};
   m.fields.forEach(f => { fieldsByName[f.name] = f; if(f.domain?.codedValues) domainsByField[f.name] = f.domain.codedValues; });
-  
-  // EL ERROR ESTABA AQUÍ: Se cambió "fields" por "fields: m.fields"
-  metaCache[key] = { fields: m.fields, fieldsByName, domainsByField }; 
-  return metaCache[key];
+  metaCache[key] = { fields: m.fields, fieldsByName, domainsByField }; return metaCache[key];
 }
 
 async function loadEntity(key) {
@@ -252,6 +249,7 @@ window.toggleSort = function(col) {
 
 function renderTable() {
   const key = currentEntityKey, canWrite = hasWritePermission(key), canDel = canDelete();
+  // Se filtran visualmente los GUIDs de la tabla
   let fields = metaCache[key].fields.filter(f => f.name === "OBJECTID" || (!f.name.includes("GlobalID") && !f.name.includes("Guid") && f.name !== "PersonaID" && f.name !== "IndicadorID"));
   
   let sortedRows = [...currentRows];
@@ -284,7 +282,7 @@ function renderTable() {
   }).join("");
 }
 
-/* ===== 5. FORMULARIOS REALES (V2->V3) ===== */
+/* ===== 5. FORMULARIOS REALES CON AUTO-CÁLCULO ===== */
 function openModalForm(oid = null) {
   const key = currentEntityKey; editingRow = oid ? currentRows.find(x => x.attributes.OBJECTID === oid) : null;
   document.getElementById("modal-title").textContent = oid ? `Editar ${key}` : `Nuevo ${key}`;
@@ -292,23 +290,38 @@ function openModalForm(oid = null) {
   document.getElementById("btn-save").style.display = hasWritePermission(key) ? "inline-flex" : "none";
   
   let html = "";
+  let hiddenHtml = "";
+
+  // Campos automáticos inyectados por ArcGIS o por nuestro sistema que NO deben verse ni editarse
+  const techFields = ["OBJECTID", "CreationDate", "Creator", "EditDate", "Editor", "PersonaUltimaEdicionID", "FechaUltimaEdicionFuncional", "PersonaID"];
+  const parentTextF = PARENT_RULES[key]?.parentText;
+
   metaCache[key].fields.forEach(f => {
-    if(f.name === "OBJECTID" || f.name.includes("GlobalID") || f.name.includes("Guid") || f.name==="PersonaID") {
-      // Ocultos para el DOM interno si es necesario, pero no visibles. GlobalID lo generamos si es nuevo.
-      return; 
-    }
+    if(techFields.includes(f.name)) return;
+
     const val = editingRow ? editingRow.attributes[f.name] : (f.name === "Vigencia" ? document.getElementById("sel-vigencia").value : "");
     const dom = metaCache[key].domainsByField[f.name];
-    const isFK = FK_MAPPING[f.name]; // Si es llave como RolID
+    const isFK = FK_MAPPING[f.name];
     
+    // Ocultar campo de texto redundante del padre (ej. ProyectoID en CFG_Objetivo)
+    if(f.name === parentTextF) {
+        hiddenHtml += `<input type="hidden" data-field="${f.name}" id="hidden-${f.name}" value="${esc(val)}" />`;
+        return;
+    }
+
+    // Listas desplegables para GlobalID / GUID
+    if(f.name.includes("GlobalID") || f.name.includes("Guid")) {
+        if(isFK && catalogs[isFK]) {
+            let opts = catalogs[isFK].map(c => `<option value="${esc(c.GlobalID || c[f.name])}" ${val===(c.GlobalID || c[f.name])?'selected':''}>${esc(labelCatalog(isFK, c))}</option>`).join("");
+            html += `<div class="field"><label>${f.alias}</label><select data-field="${f.name}" data-parent="1"><option value="">- Selecciona -</option>${opts}</select></div>`;
+        }
+        return; 
+    }
+
     if(dom) {
       let opts = dom.map(d => `<option value="${esc(d.code)}" ${val===d.code?'selected':''}>${esc(d.name)}</option>`).join("");
       html += `<div class="field"><label>${f.alias}</label><select data-field="${f.name}"><option value="">- Selecciona -</option>${opts}</select></div>`;
     } 
-    else if(isFK && catalogs[FK_MAPPING[f.name]]) {
-      let opts = catalogs[FK_MAPPING[f.name]].map(c => `<option value="${esc(c.GlobalID || c[f.name])}" ${val===(c.GlobalID || c[f.name])?'selected':''}>${esc(labelCatalog(FK_MAPPING[f.name], c))}</option>`).join("");
-      html += `<div class="field"><label>${f.alias}</label><select data-field="${f.name}" data-parent="1"><option value="">- Selecciona -</option>${opts}</select></div>`;
-    }
     else {
       const type = (f.name.includes("Peso") || f.name.includes("Valor") || f.type==="esriFieldTypeDouble") ? "number" : "text";
       const isWeight = PARENT_RULES[key]?.weight === f.name;
@@ -319,20 +332,25 @@ function openModalForm(oid = null) {
     }
   });
 
-  // Añadir los FKs GlobalID ocultos pero conectados al formulario para que viajen en el payload
-  metaCache[key].fields.forEach(f => {
-    if(FK_MAPPING[f.name] && f.name.includes("GlobalID")) {
-      const val = editingRow ? editingRow.attributes[f.name] : "";
-      let opts = catalogs[FK_MAPPING[f.name]].map(c => `<option value="${esc(c.GlobalID)}" ${val===c.GlobalID?'selected':''}>${esc(labelCatalog(FK_MAPPING[f.name], c))}</option>`).join("");
-      html += `<div class="field"><label>${f.alias}</label><select data-field="${f.name}" data-parent="1" data-fk="1"><option value="">- Selecciona -</option>${opts}</select></div>`;
-    }
-  });
-
-  formDyn.innerHTML = `<div class="formgrid">${html}</div>`;
+  formDyn.innerHTML = `<div class="formgrid">${html}</div>${hiddenHtml}`;
   document.getElementById("modal").classList.add("is-open");
   
   if(PARENT_RULES[key]) {
-    formDyn.querySelectorAll("select[data-parent]").forEach(s => s.addEventListener("change", () => checkWeight(key)));
+    const pSel = formDyn.querySelector(`select[data-field="${PARENT_RULES[key].fk}"]`);
+    if(pSel) {
+        pSel.addEventListener("change", (e) => {
+            checkWeight(key);
+            // Auto-calcular e inyectar el código de texto del padre oculto
+            if (parentTextF) {
+                const hInput = document.getElementById(`hidden-${parentTextF}`);
+                if(hInput) {
+                    const pEntity = PARENT_RULES[key].parent;
+                    const pObj = catalogs[pEntity]?.find(x => x.GlobalID === e.target.value);
+                    hInput.value = pObj ? (pObj[parentTextF] || "") : "";
+                }
+            }
+        });
+    }
     formDyn.querySelectorAll(`input[data-field="${PARENT_RULES[key].weight}"]`).forEach(i => i.addEventListener("input", () => checkWeight(key)));
     checkWeight(key);
   }
@@ -360,9 +378,8 @@ async function checkWeight(key) {
 async function save() {
   const key = currentEntityKey, attrs = {};
   if(editingRow) attrs.OBJECTID = editingRow.attributes.OBJECTID;
-  else attrs.GlobalID = generateGUID(); // Generar en cliente para nuevos
+  else attrs.GlobalID = generateGUID(); 
   
-  // Trazabilidad V3
   if(metaCache[key].fieldsByName["PersonaUltimaEdicionID"]) attrs.PersonaUltimaEdicionID = SESSION.personaID;
 
   formDyn.querySelectorAll("[data-field]").forEach(el => { 
