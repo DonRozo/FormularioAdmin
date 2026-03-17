@@ -1,7 +1,7 @@
 /* ===========================================================
    DATA-PAC | Admin OAP V3 (script.js)
-   - OTP Auth, RBAC, Sorting, Formularios Reales, Pesos, Auditoría
-   - MEJORAS: Prevención de duplicados, Padre 1er lugar, Auto-fill Nombre
+   - OTP Auth, RBAC, Sorting, Formularios Reales, Auditoría
+   - MEJORAS: Buscador Dinámico en servidor, Limpieza automática
    =========================================================== */
 
 const SERVICE_URL = "https://services6.arcgis.com/yq6pe3Lw2oWFjWtF/arcgis/rest/services/DATAPAC_V3/FeatureServer";
@@ -49,6 +49,22 @@ const UNIQUE_FIELDS = {
   CFG_Objetivo: "ObjetivoID", CFG_Actividad: "ActividadID", CFG_SubActividad: "CodigoSubActividad", CFG_Tarea: "CodigoTarea"
 };
 
+// NUEVO: Campos prioritarios de búsqueda por tabla
+const SEARCH_FIELDS = {
+  CFG_PAC: ["PACID", "Nombre"], CFG_Linea: ["LineaID", "Nombre"], CFG_Programa: ["ProgramaID", "Nombre"],
+  CFG_Proyecto: ["ProyectoID", "Nombre"], CFG_Objetivo: ["ObjetivoID", "Nombre"],
+  CFG_Actividad: ["ActividadID", "NombreActividad", "Nombre"],
+  CFG_SubActividad: ["CodigoSubActividad", "NombreSubActividad", "SiglaVariable"],
+  CFG_Tarea: ["CodigoTarea", "NombreTarea"],
+  PLAN_SubActividadVigencia: ["UnidadMedida", "SiglaVariable"],
+  PLAN_TareaVigencia: ["UnidadMedida"],
+  SEG_Persona: ["PersonaID", "Nombre", "Cedula", "Correo"],
+  SEG_Rol: ["RolID", "NombreRol"], SEG_Asignacion: ["Estado"],
+  AUD_HistorialCambio: ["TipoObjeto", "ObjetoGlobalID", "CampoModificado", "ValorAnterior", "ValorNuevo", "MotivoCambio", "OrigenCambio"],
+  AUD_EventoSistema: ["TipoEvento", "Entidad", "Resultado", "DetalleEvento"],
+  WF_SolicitudRevision: ["EstadoActual", "ComentarioSolicitante"]
+};
+
 /* ===== Estado ===== */
 const SESSION = { personaID: null, personaGlobalID: null, nombre: null, roles: [], isSuperAdmin: false, isVisualizador: false, maxPerm: "Ver", allowedGuids: {}, assignedTasks: new Set(), tablePermissions: {} };
 let currentEntityKey = null, currentRows = [], editingRow = null, metaCache = {}, catalogs = {};
@@ -83,7 +99,7 @@ function generateGUID() {
   return '{' + crypto.randomUUID().toUpperCase() + '}'; 
 }
 
-/* ===== FETCH & POST CORE (Caché Buster) ===== */
+/* ===== FETCH & POST CORE ===== */
 async function fetchJson(url, params){
   const u = new URL(url); 
   Object.entries(params||{}).forEach(([k,v]) => u.searchParams.set(k,v));
@@ -135,41 +151,24 @@ document.getElementById("btn-request-otp").addEventListener("click", async () =>
   
   if(!ced || !cor) return setStatus("Ingresa cédula y correo.", "error", true);
   
-  btn.disabled = true; 
-  btn.textContent = "Validando..."; 
-  setStatus("Verificando...", "info", true);
-  
+  btn.disabled = true; btn.textContent = "Validando..."; setStatus("Verificando...", "info", true);
   try {
     const res = await fetchJson(entityUrl("SEG_Persona") + "/query", { f: "json", where: `Cedula='${ced}' AND Correo='${cor}' AND Activo='SI'`, outFields: "GlobalID,PersonaID,Nombre", returnGeometry: false });
     if(!res.features || res.features.length === 0) throw new Error("Credenciales inválidas.");
     
-    const p = res.features[0].attributes; 
-    SESSION.personaGlobalID = p.GlobalID; 
-    SESSION.personaID = p.PersonaID; 
-    SESSION.nombre = p.Nombre;
+    const p = res.features[0].attributes; SESSION.personaGlobalID = p.GlobalID; SESSION.personaID = p.PersonaID; SESSION.nombre = p.Nombre;
     
     btn.textContent = "Generando código...";
     const webhookRes = await fetch(URL_WEBHOOK_POWERAUTOMATE, { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({cedula: ced, correo: cor}) });
     
     if(webhookRes.status === 200 || webhookRes.status === 202) {
-        document.getElementById("otp-step-1").classList.add("is-hidden"); 
-        document.getElementById("otp-step-2").classList.remove("is-hidden"); 
-        setStatus("Código enviado.", "success", true);
-    } else {
-        throw new Error(`Error PA: ${webhookRes.status}`);
-    }
-  } catch(e) { 
-    setStatus(e.message, "error", true); 
-  } finally { 
-    btn.disabled = false; 
-    btn.textContent = "Solicitar Código"; 
-  }
+        document.getElementById("otp-step-1").classList.add("is-hidden"); document.getElementById("otp-step-2").classList.remove("is-hidden"); setStatus("Código enviado.", "success", true);
+    } else { throw new Error(`Error PA: ${webhookRes.status}`); }
+  } catch(e) { setStatus(e.message, "error", true); } finally { btn.disabled = false; btn.textContent = "Solicitar Código"; }
 });
 
 document.getElementById("btn-verify-otp").addEventListener("click", async () => {
-  const code = document.getElementById("inp-codigo").value.trim(); 
-  if(!code) return;
-  
+  const code = document.getElementById("inp-codigo").value.trim(); if(!code) return;
   setStatus("Validando código...", "info", true);
   try {
     const res = await fetchJson(entityUrl("SEG_OTP") + "/query", { f: "json", where: `PersonaGlobalID='${SESSION.personaGlobalID}' AND CodigoHash='${code}' AND Usado='NO'`, outFields: "OBJECTID", returnGeometry: false });
@@ -178,15 +177,11 @@ document.getElementById("btn-verify-otp").addEventListener("click", async () => 
     await postForm(entityUrl("SEG_OTP") + "/applyEdits", { updates: [{attributes: {OBJECTID: res.features[0].attributes.OBJECTID, Usado: 'SI'}}] });
     await writeAuditEvent("OTP_VALIDATE", "SEG_Persona", SESSION.personaGlobalID, "OK", "Ingreso exitoso al panel Admin");
     await initSession();
-  } catch(e) { 
-    setStatus(e.message, "error", true); 
-  }
+  } catch(e) { setStatus(e.message, "error", true); }
 });
 
 document.getElementById("btn-back-otp").addEventListener("click", () => {
-  document.getElementById("otp-step-2").classList.add("is-hidden"); 
-  document.getElementById("otp-step-1").classList.remove("is-hidden"); 
-  setStatus("", "info", true);
+  document.getElementById("otp-step-2").classList.add("is-hidden"); document.getElementById("otp-step-1").classList.remove("is-hidden"); setStatus("", "info", true);
 });
 
 /* ===== 2. CARGA DE SESIÓN Y CATÁLOGOS ===== */
@@ -200,31 +195,20 @@ async function initSession() {
 
     const resA = await fetchJson(entityUrl("SEG_Alcance") + "/query", { f: "json", where: `PersonaID='${SESSION.personaID}' AND Activo='SI'`, outFields: "NivelJerarquia,ObjetoGlobalID,Permiso", returnGeometry: false });
     const alcances = (resA.features || []).map(f => f.attributes);
-    const permWeight = {"Ver":1, "Revisar":2, "Aprobar":3, "Editar":4, "Administrar":5}; 
-    let maxW = 0;
+    const permWeight = {"Ver":1, "Revisar":2, "Aprobar":3, "Editar":4, "Administrar":5}; let maxW = 0;
     
-    alcances.forEach(a => { 
-        if(permWeight[a.Permiso] > maxW) { 
-            maxW = permWeight[a.Permiso]; 
-            SESSION.maxPerm = a.Permiso; 
-        }
-    });
-    
+    alcances.forEach(a => { if(permWeight[a.Permiso] > maxW) { maxW = permWeight[a.Permiso]; SESSION.maxPerm = a.Permiso; } });
     if(SESSION.isSuperAdmin) SESSION.maxPerm = "Administrar";
 
     const resAsig = await fetchJson(entityUrl("SEG_Asignacion") + "/query", { f: "json", where: `PersonaGlobalID='${SESSION.personaGlobalID}' AND Activo='SI'`, outFields: "TareaGlobalID", returnGeometry: false });
     (resAsig.features || []).forEach(f => SESSION.assignedTasks.add(f.attributes.TareaGlobalID));
     
     if(!SESSION.isSuperAdmin) await resolveHierarchy(alcances);
-
     await loadCatalogs();
-    document.getElementById("otp-overlay").style.display = "none"; 
-    uiApp.style.display = "flex";
+    document.getElementById("otp-overlay").style.display = "none"; uiApp.style.display = "flex";
     document.getElementById("pill-user").textContent = `Usuario: ${SESSION.nombre} (${SESSION.roles.join(", ")})`;
     buildDynamicMenu();
-  } catch(e) { 
-    setStatus(e.message, "error", true); 
-  }
+  } catch(e) { setStatus(e.message, "error", true); }
 }
 
 async function resolveHierarchy(alcances) {
@@ -233,8 +217,7 @@ async function resolveHierarchy(alcances) {
   
   alcances.forEach(alc => {
     let k = `CFG_${alc.NivelJerarquia.charAt(0) + alc.NivelJerarquia.slice(1).toLowerCase()}`;
-    if(alc.NivelJerarquia === "SUBACTIVIDAD") k = "CFG_SubActividad"; 
-    if(alc.NivelJerarquia === "PAC") k = "CFG_PAC";
+    if(alc.NivelJerarquia === "SUBACTIVIDAD") k = "CFG_SubActividad"; if(alc.NivelJerarquia === "PAC") k = "CFG_PAC";
     if(SESSION.allowedGuids[k] && alc.ObjetoGlobalID) SESSION.allowedGuids[k].add(alc.ObjetoGlobalID);
   });
   
@@ -246,9 +229,7 @@ async function resolveHierarchy(alcances) {
   
   function propagate(pKey, cKey, fk) {
     if(SESSION.allowedGuids[pKey].size === 0) return;
-    arbol[cKey].forEach(row => { 
-        if(SESSION.allowedGuids[pKey].has(row[fk])) SESSION.allowedGuids[cKey].add(row.GlobalID); 
-    });
+    arbol[cKey].forEach(row => { if(SESSION.allowedGuids[pKey].has(row[fk])) SESSION.allowedGuids[cKey].add(row.GlobalID); });
   }
   
   propagate("CFG_PAC", "CFG_Linea", "PACGlobalID"); propagate("CFG_Linea", "CFG_Programa", "LineaGlobalID");
@@ -258,18 +239,14 @@ async function resolveHierarchy(alcances) {
 }
 
 async function loadCatalogs() {
-  const v = document.getElementById("sel-vigencia").value; 
-  const vigW = v ? `Vigencia=${v}` : "1=1";
-  
+  const v = document.getElementById("sel-vigencia").value; const vigW = v ? `Vigencia=${v}` : "1=1";
   async function fetchCat(k, nameF, extra=""){
     const w = (metaCache[k]?.fieldsByName?.["Vigencia"]) ? vigW : "1=1";
     const r = await fetchJson(`${entityUrl(k)}/query`, { f: "json", where: w, outFields: `GlobalID,${nameF}${extra}`, orderByFields: `${nameF} ASC`, returnGeometry: false });
     catalogs[k] = (r.features || []).map(f => f.attributes);
   }
   
-  if(!metaCache["CFG_PAC"]) { 
-      for(let k of Object.keys(FK_MAPPING)) await getMeta(FK_MAPPING[k]); 
-  }
+  if(!metaCache["CFG_PAC"]) { for(let k of Object.keys(FK_MAPPING)) await getMeta(FK_MAPPING[k]); }
   
   await fetchCat("CFG_PAC", "Nombre", ",PACID"); await fetchCat("CFG_Linea", "Nombre", ",LineaID");
   await fetchCat("CFG_Programa", "Nombre", ",ProgramaID"); await fetchCat("CFG_Proyecto", "Nombre", ",ProyectoID");
@@ -307,7 +284,9 @@ function buildDynamicMenu() {
     let html = `<div class="navgroup">${g.label}</div>`, has = false;
     Object.keys(ENTITY).forEach(k => {
       if((g.prefix ? k.startsWith(g.prefix) : g.prefixes.some(p => k.startsWith(p))) && vis.has(k)) {
-        has = true; html += `<button class="navitem" onclick="loadEntity('${k}')"><span class="navitem__title">${k}</span></button>`;
+        has = true; 
+        // Agregamos clearSearch=true al dar click en el menú
+        html += `<button class="navitem" onclick="loadEntity('${k}', true)"><span class="navitem__title">${k}</span></button>`;
       }
     });
     if(has) nav.innerHTML += html;
@@ -321,7 +300,8 @@ function hasWritePermission(key) {
   return true;
 }
 
-function buildWhere(key) {
+// LÓGICA DE SEGURIDAD BASE (Vigencia + RBAC)
+function buildSecurityWhere(key) {
   let w = "1=1", vig = document.getElementById("sel-vigencia").value;
   if(vig && metaCache[key]?.fieldsByName?.["Vigencia"]) w += ` AND Vigencia = ${vig}`;
   if(SESSION.isSuperAdmin) return w;
@@ -331,7 +311,6 @@ function buildWhere(key) {
     if(!guids.length) return "1=0";
     w += ` AND GlobalID IN (${guids.map(g => `'${g}'`).join(",")})`;
   }
-  
   if(["REP_AvanceTarea", "PLAN_TareaVigencia"].includes(key)) {
     const tG = Array.from(SESSION.assignedTasks); 
     if(!tG.length && SESSION.maxPerm === "Ver") return "1=0"; 
@@ -340,7 +319,36 @@ function buildWhere(key) {
   return w;
 }
 
-/* ===== 4. TABLA CON ORDENAMIENTO Y LIMPIEZA DE METADATOS ===== */
+// LÓGICA DE BÚSQUEDA INTEGRADA EN EL SERVIDOR
+function buildWhere(key) {
+  const securityW = buildSecurityWhere(key);
+  const st = document.getElementById("txt-search").value.trim().toUpperCase();
+  if(!st) return securityW;
+
+  let sFields = SEARCH_FIELDS[key];
+  // Fallback si no está definida: Buscar en todos los textos útiles
+  if(!sFields && metaCache[key]) {
+      sFields = metaCache[key].fields
+          .filter(f => f.type === "esriFieldTypeString" && !f.name.includes("GlobalID") && !f.name.includes("Guid"))
+          .map(f => f.name);
+  }
+  if(!sFields || !sFields.length) return securityW;
+
+  const validFields = sFields.filter(f => metaCache[key].fieldsByName[f]);
+  if(!validFields.length) return securityW;
+
+  const clauses = validFields.map(f => {
+      const metaF = metaCache[key].fieldsByName[f];
+      if (metaF.type === "esriFieldTypeString") return `UPPER(${f}) LIKE '%${st}%'`;
+      if (!isNaN(st) && ["esriFieldTypeInteger", "esriFieldTypeDouble", "esriFieldTypeSmallInteger"].includes(metaF.type)) return `${f} = ${Number(st)}`;
+      return null;
+  }).filter(x => x !== null);
+
+  if(!clauses.length) return securityW;
+  return `${securityW} AND (${clauses.join(" OR ")})`;
+}
+
+/* ===== 4. TABLA CON ORDENAMIENTO ===== */
 async function getMeta(key){
   if(metaCache[key]) return metaCache[key];
   const m = await fetchJson(`${entityUrl(key)}?f=pjson`);
@@ -350,7 +358,9 @@ async function getMeta(key){
   return metaCache[key];
 }
 
-async function loadEntity(key) {
+async function loadEntity(key, clearSearch = false) {
+  if (clearSearch) document.getElementById("txt-search").value = "";
+  
   currentEntityKey = key; 
   document.querySelectorAll(".navitem").forEach(b => { b.classList.toggle("is-active", b.textContent.includes(key)); });
   document.getElementById("h-entity").textContent = key;
@@ -358,12 +368,21 @@ async function loadEntity(key) {
   
   setStatus("Cargando datos..."); 
   await getMeta(key);
+  
+  // Ejecutamos el query con seguridad + vigencia + filtro de búsqueda
   const r = await fetchJson(`${entityUrl(key)}/query`, { f: "json", where: buildWhere(key), outFields: "*", returnGeometry: false });
   currentRows = r.features || []; 
   currentSort = { col: null, dir: 0 };
   
   renderTable(); 
-  setStatus(`Cargados ${currentRows.length} registros.`, "success");
+  
+  // Feedback dinámico de búsqueda
+  const st = document.getElementById("txt-search").value.trim();
+  if (currentRows.length === 0 && st) {
+      setStatus(`Sin resultados para '${st}'.`, "info");
+  } else {
+      setStatus(`Cargados ${currentRows.length} registros.`, "success");
+  }
 }
 
 window.toggleSort = function(col) {
@@ -448,7 +467,7 @@ window.confirmDelete = async function(oid) {
     await writeAuditHistory(key, oid, parentGid, "__DELETE__", serializeAuditRecord(row.attributes), "", "Borrado de interfaz Admin");
 
     await loadCatalogs();
-    await loadEntity(key);
+    await loadEntity(key, false);
     setStatus("Registro eliminado exitosamente.", "success");
   } catch(e) {
     if (!e.message.includes("Dependencias encontradas")) {
@@ -670,7 +689,7 @@ async function save() {
 
       document.getElementById("modal").classList.remove("is-open");
       await loadCatalogs();
-      await loadEntity(key);
+      await loadEntity(key, false);
   } catch (err) {
       await writeAuditEvent(isUpdate ? "UPDATE" : "CREATE", key, isUpdate ? originalAttrs.GlobalID : attrs.GlobalID, "ERROR", err.message);
       throw err;
@@ -729,7 +748,7 @@ document.getElementById("btn-delete").addEventListener("click", async () => {
 
     document.getElementById("modal").classList.remove("is-open"); 
     await loadCatalogs(); 
-    await loadEntity(key); 
+    await loadEntity(key, false); 
     setStatus("Registro eliminado exitosamente.", "success");
   } catch(e) { 
     if (!e.message.includes("Dependencias encontradas")) await writeAuditEvent("DELETE", key, parentGid, "ERROR", e.message);
@@ -742,7 +761,14 @@ document.getElementById("btn-delete").addEventListener("click", async () => {
 
 /* ===== EVENTOS COMPLEMENTARIOS ===== */
 document.getElementById("btn-close").addEventListener("click", () => document.getElementById("modal").classList.remove("is-open"));
-document.getElementById("btn-reload").addEventListener("click", () => loadEntity(currentEntityKey));
+document.getElementById("btn-reload").addEventListener("click", () => loadEntity(currentEntityKey, false));
 document.getElementById("btn-new").addEventListener("click", () => openModalForm(null));
-document.getElementById("sel-vigencia").addEventListener("change", async () => { await loadCatalogs(); if(currentEntityKey) await loadEntity(currentEntityKey); });
-let tOut; document.getElementById("txt-search").addEventListener("input", () => { clearTimeout(tOut); tOut = setTimeout(() => loadEntity(currentEntityKey), 300); });
+document.getElementById("sel-vigencia").addEventListener("change", async () => { await loadCatalogs(); if(currentEntityKey) await loadEntity(currentEntityKey, false); });
+
+let tOut; 
+document.getElementById("txt-search").addEventListener("input", () => { 
+    clearTimeout(tOut); 
+    tOut = setTimeout(() => {
+        if(currentEntityKey) loadEntity(currentEntityKey, false);
+    }, 350); 
+});
