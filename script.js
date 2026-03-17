@@ -395,16 +395,38 @@ async function save() {
   const url = `${entityUrl(key)}/applyEdits`;
   const p = editingRow ? { updates: [{attributes:attrs}] } : { adds: [{attributes:attrs}] };
   const res = await postForm(url, p);
-  if(res.error || (res.addResults && !res.addResults[0].success) || (res.updateResults && !res.updateResults[0].success)) throw new Error("Error en servidor al guardar.");
   
+  // FIX: Validación segura de la respuesta de ArcGIS
+  if (res.error) throw new Error(res.error.message || "Error en el servidor.");
+  if (res.addResults && res.addResults.length > 0 && !res.addResults[0].success) throw new Error("Error al crear el registro.");
+  if (res.updateResults && res.updateResults.length > 0 && !res.updateResults[0].success) throw new Error("Error al actualizar el registro.");
+  
+  // Si todo sale bien, cerramos el modal y recargamos la tabla
   document.getElementById("modal").classList.remove("is-open");
   await loadCatalogs();
   await loadEntity(key);
 }
 
 document.getElementById("btn-save").addEventListener("click", async () => {
-  const btn = document.getElementById("btn-save"); btn.disabled=true;
-  try { await save(); setStatus("Guardado con éxito.", "success"); } catch(e) { setStatus(e.message, "error"); } finally { btn.disabled=false; }
+  const btn = document.getElementById("btn-save"); 
+  const originalText = btn.textContent;
+  
+  try { 
+    // UX: Feedback visual inmediato
+    btn.disabled = true; 
+    btn.textContent = "Guardando... ⏳"; 
+    setStatus("Enviando datos al servidor...", "info");
+    
+    await save(); 
+    
+    setStatus("Guardado con éxito.", "success"); 
+  } catch(e) { 
+    setStatus(e.message, "error"); 
+  } finally { 
+    // Restaurar el botón en caso de error o para futuros usos
+    btn.disabled = false; 
+    btn.textContent = originalText;
+  }
 });
 
 /* ===== 6. BORRADO CON REGLAS ===== */
