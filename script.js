@@ -1,7 +1,7 @@
 /* ===========================================================
    DATA-PAC | Admin OAP V3 (script.js)
    - OTP Auth, RBAC, Sorting, Formularios Reales, Auditoría
-   - MEJORAS: Buscador Dinámico, Corrección Labels, Integración ResponsableGlobalID
+   - MEJORAS: Buscador Dinámico, Corrección Labels, Integración ResponsableGlobalID (UPDATE ROBUSTO)
    =========================================================== */
 
 const SERVICE_URL = "https://services6.arcgis.com/yq6pe3Lw2oWFjWtF/arcgis/rest/services/DATAPAC_V3/FeatureServer";
@@ -28,7 +28,6 @@ const PARENT_RULES = {
   PLAN_TareaVigencia: { fk: "TareaGlobalID", parent: "CFG_Tarea", weight: "PesoTarea" }
 };
 
-// Se agregó ResponsableGlobalID al mapeo de FKs
 const FK_MAPPING = {
   PACGlobalID: "CFG_PAC", LineaGlobalID: "CFG_Linea", ProgramaGlobalID: "CFG_Programa",
   ProyectoGlobalID: "CFG_Proyecto", ObjetivoGlobalID: "CFG_Objetivo", ActividadGlobalID: "CFG_Actividad",
@@ -49,7 +48,6 @@ const UNIQUE_FIELDS = {
   CFG_Objetivo: "ObjetivoID", CFG_Actividad: "ActividadID", CFG_SubActividad: "CodigoSubActividad", CFG_Tarea: "CodigoTarea"
 };
 
-// Se agregó Responsable a la búsqueda de AvanceTarea
 const SEARCH_FIELDS = {
   CFG_PAC: ["PACID", "Nombre"], CFG_Linea: ["LineaID", "Nombre"], CFG_Programa: ["ProgramaID", "Nombre"],
   CFG_Proyecto: ["ProyectoID", "Nombre"], CFG_Objetivo: ["ObjetivoID", "Nombre"],
@@ -264,7 +262,6 @@ async function loadCatalogs() {
   await fetchCat("CFG_Actividad", "NombreActividad", ",ActividadID,Nombre");
   await fetchCat("CFG_SubActividad", "NombreSubActividad", ",CodigoSubActividad"); 
   await fetchCat("CFG_Tarea", "NombreTarea", ",CodigoTarea");
-  // Extraemos Correo y Cedula para labels completos en SEG_Persona
   await fetchCat("SEG_Persona", "Nombre", ",Cedula,Correo,PersonaID"); 
   await fetchCat("SEG_Rol", "NombreRol", ",RolID");
 }
@@ -447,7 +444,9 @@ window.confirmDelete = async function(oid) {
     
     const res = await postForm(`${entityUrl(key)}/applyEdits`, { deletes: String(oid) });
     if (res.error) throw new Error(res.error.message || "Error en el servidor al eliminar.");
-    if (res.deleteResults && res.deleteResults.length > 0 && !res.deleteResults[0].success) throw new Error(`AGOL rechazó el borrado: ${res.deleteResults[0].error?.description || "Error"}`);
+    if (res.deleteResults && res.deleteResults.length > 0 && !res.deleteResults[0].success) {
+      throw new Error(`AGOL rechazó el borrado: ${res.deleteResults[0].error?.description || res.deleteResults[0].error?.message || "Error desconocido"}`);
+    }
     
     await writeAuditEvent("DELETE", key, parentGid, "OK", "Registro eliminado exitosamente.");
     await writeAuditHistory(key, oid, parentGid, "__DELETE__", serializeAuditRecord(row.attributes), "", "Borrado de interfaz Admin");
@@ -503,24 +502,23 @@ function openModalForm(oid = null) {
     const dom = metaCache[key].domainsByField[f.name];
     const isFK = FK_MAPPING[f.name];
     
-    // Ocultar campo texto del padre, Nombre legado de Actividad, y Responsable texto en REP_AvanceTarea
+    // Ocultar campos de texto dependientes de UI
     if(f.name === parentTextF || (key === "CFG_Actividad" && f.name === "Nombre") || (key === "REP_AvanceTarea" && f.name === "Responsable")) {
         hiddenHtml += `<input type="hidden" data-field="${f.name}" id="hidden-${f.name}" value="${esc(val)}" />`; 
         return;
     }
     
-    // CASO ESPECIAL: ResponsableGlobalID en REP_AvanceTarea
+    // CASO ESPECIAL: ResponsableGlobalID en REP_AvanceTarea (Resuelve históricos)
     if(key === "REP_AvanceTarea" && f.name === "ResponsableGlobalID") {
         let currentFkVal = val;
         let oldNameHint = "";
         
-        // Auto-resolución para registros históricos que sólo tenían texto
         if (editingRow && !currentFkVal) {
              const oldName = editingRow.attributes["Responsable"];
              if (oldName) {
                  const matches = catalogs["SEG_Persona"]?.filter(p => p.Nombre && p.Nombre.trim().toLowerCase() === oldName.trim().toLowerCase());
                  if (matches && matches.length === 1) {
-                     currentFkVal = matches[0].GlobalID; // Auto-enlaza si la coincidencia es exacta
+                     currentFkVal = matches[0].GlobalID; 
                  } else {
                      oldNameHint = `(Antiguo: ${esc(oldName)})`;
                  }
@@ -534,7 +532,7 @@ function openModalForm(oid = null) {
                         <option value="">- Seleccione Responsable - ${oldNameHint}</option>
                         ${opts}
                     </select>
-                    ${oldNameHint ? `<span class="help-text" style="color:#d64545;">Debe reasignar el responsable válido de la lista.</span>` : ''}
+                    ${oldNameHint ? `<span class="help-text" style="color:#d64545;">Debe reasignar un responsable válido de la lista.</span>` : ''}
                  </div>`;
         return;
     }
@@ -587,18 +585,6 @@ function openModalForm(oid = null) {
     formDyn.querySelectorAll(`input[data-field="${PARENT_RULES[key].weight}"]`).forEach(i => i.addEventListener("input", () => checkWeight(key)));
     checkWeight(key);
   }
-
-  // Evento especial para inyectar Responsable texto desde el Combo GUID
-  const selResp = document.getElementById("sel-responsable");
-  if (selResp) {
-      selResp.addEventListener("change", (e) => {
-          const hidResp = document.getElementById("hidden-Responsable");
-          if (hidResp) {
-              const match = catalogs["SEG_Persona"]?.find(x => x.GlobalID === e.target.value);
-              hidResp.value = match ? match.Nombre : "";
-          }
-      });
-  }
 }
 
 formDyn.addEventListener("input", (e) => {
@@ -632,7 +618,7 @@ async function checkWeight(key) {
   } catch(e) {}
 }
 
-/* ===== 7. GUARDADO CON VALIDACIONES Y AUDITORÍA ===== */
+/* ===== 7. GUARDADO CON EXTRACCIÓN FUERTE Y MANEJO DE ERRORES REALES ===== */
 async function save() {
   const key = currentEntityKey, attrs = {};
   const isUpdate = !!editingRow;
@@ -653,11 +639,29 @@ async function save() {
 
   if(key === "CFG_Actividad") attrs["Nombre"] = attrs["NombreActividad"];
 
-  // Validación Fuerte REP_AvanceTarea: Exigir Responsable
-  if (key === "REP_AvanceTarea" && !attrs["ResponsableGlobalID"]) {
-      const inputEl = document.getElementById("sel-responsable");
-      if(inputEl) { inputEl.classList.add("field-error"); inputEl.focus(); }
-      throw new Error("Debe seleccionar un responsable válido de la lista.");
+  // Validación Fuerte y Sincronización para REP_AvanceTarea (Edit robusto)
+  if (key === "REP_AvanceTarea") {
+      const respGid = attrs["ResponsableGlobalID"];
+      if (!respGid) {
+          const inputEl = document.getElementById("sel-responsable");
+          if(inputEl) { inputEl.classList.add("field-error"); inputEl.focus(); }
+          throw new Error("Debe seleccionar un responsable válido de la lista.");
+      }
+      
+      const personObj = catalogs["SEG_Persona"]?.find(p => p.GlobalID === respGid);
+      if (!personObj) throw new Error("El responsable seleccionado no pudo resolverse en el catálogo SEG_Persona.");
+      
+      // La fuente de verdad del texto siempre es el catálogo
+      attrs["Responsable"] = personObj.Nombre;
+
+      if (isUpdate) {
+          console.log("--- DEPURACIÓN UPDATE REP_AvanceTarea ---");
+          console.log("Registro Original:", originalAttrs);
+          console.log("Persona Seleccionada (GUID):", respGid);
+          console.log("Persona Seleccionada (Nombre):", attrs["Responsable"]);
+          console.log("Payload a enviar:", attrs);
+          console.log("-----------------------------------------");
+      }
   }
 
   const uniqueField = UNIQUE_FIELDS[key];
@@ -685,9 +689,17 @@ async function save() {
   
   try {
       const res = await postForm(url, p);
-      if (res.error) throw new Error(res.error.message || "Error en el servidor.");
-      if (res.addResults && res.addResults.length > 0 && !res.addResults[0].success) throw new Error("Error al crear el registro.");
-      if (res.updateResults && res.updateResults.length > 0 && !res.updateResults[0].success) throw new Error("Error al actualizar el registro.");
+      if (res.error) throw new Error(res.error.message || "Error genérico en el servidor.");
+      
+      if (res.addResults && res.addResults.length > 0 && !res.addResults[0].success) {
+          const errDesc = res.addResults[0].error?.description || res.addResults[0].error?.message || "Error desconocido";
+          throw new Error(`Error al crear: ${errDesc}`);
+      }
+      
+      if (res.updateResults && res.updateResults.length > 0 && !res.updateResults[0].success) {
+          const errDesc = res.updateResults[0].error?.description || res.updateResults[0].error?.message || "Error desconocido";
+          throw new Error(`Error al actualizar: ${errDesc}`);
+      }
       
       const resultingObjectId = isUpdate ? attrs.OBJECTID : res.addResults[0].objectId;
       const resultingGlobalId = isUpdate ? originalAttrs.GlobalID : attrs.GlobalID;
@@ -695,7 +707,7 @@ async function save() {
       if (isUpdate) {
           let changes = [];
           for(let k in attrs) {
-              if (k === "OBJECTID" || k === "GlobalID" || k === "PersonaUltimaEdicionID" || k === "Nombre") continue;
+              if (k === "OBJECTID" || k === "GlobalID" || k === "PersonaUltimaEdicionID" || (key === "CFG_Actividad" && k === "Nombre")) continue;
               const oldV = originalAttrs[k] == null ? "" : originalAttrs[k]; const newV = attrs[k] == null ? "" : attrs[k];
               if (String(oldV) !== String(newV)) changes.push({ campo: k, old: oldV, new: newV });
           }
@@ -740,7 +752,9 @@ document.getElementById("btn-delete").addEventListener("click", async () => {
     }
     const res = await postForm(`${entityUrl(key)}/applyEdits`, { deletes: String(oid) });
     if(res.error) throw new Error(res.error.message || "Error al eliminar");
-    if(res.deleteResults && res.deleteResults.length > 0 && !res.deleteResults[0].success) throw new Error(`Error en servidor`);
+    if(res.deleteResults && res.deleteResults.length > 0 && !res.deleteResults[0].success) {
+      throw new Error(`Error al eliminar: ${res.deleteResults[0].error?.description || "Desconocido"}`);
+    }
     
     await writeAuditEvent("DELETE", key, parentGid, "OK", "Registro eliminado.");
     await writeAuditHistory(key, oid, parentGid, "__DELETE__", serializeAuditRecord(editingRow.attributes), "", "");
