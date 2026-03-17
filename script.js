@@ -1,6 +1,7 @@
 /* ===========================================================
    DATA-PAC | Admin OAP V3 (script.js)
    - OTP Auth, RBAC, Sorting, Formularios Reales, Pesos, Auto-cálculo IDs
+   - Tablas limpias (sin metadatos ArcGIS ni GUIDs)
    =========================================================== */
 
 const SERVICE_URL = "https://services6.arcgis.com/yq6pe3Lw2oWFjWtF/arcgis/rest/services/DATAPAC_V3/FeatureServer";
@@ -222,7 +223,7 @@ function buildWhere(key) {
   return w;
 }
 
-/* ===== 4. TABLA CON ORDENAMIENTO ===== */
+/* ===== 4. TABLA CON ORDENAMIENTO Y LIMPIEZA DE METADATOS ===== */
 async function getMeta(key){
   if(metaCache[key]) return metaCache[key];
   const m = await fetchJson(`${entityUrl(key)}?f=pjson`);
@@ -249,8 +250,14 @@ window.toggleSort = function(col) {
 
 function renderTable() {
   const key = currentEntityKey, canWrite = hasWritePermission(key), canDel = canDelete();
-  // Se filtran visualmente los GUIDs de la tabla
-  let fields = metaCache[key].fields.filter(f => f.name === "OBJECTID" || (!f.name.includes("GlobalID") && !f.name.includes("Guid") && f.name !== "PersonaID" && f.name !== "IndicadorID"));
+  
+  // Ocultar campos de sistema (Metadatos ArcGIS y Auditoría) en la tabla visual
+  const techFields = ["CreationDate", "Creator", "EditDate", "Editor", "PersonaUltimaEdicionID", "FechaUltimaEdicionFuncional", "PersonaID"];
+  
+  let fields = metaCache[key].fields.filter(f => 
+    f.name === "OBJECTID" || 
+    (!f.name.includes("GlobalID") && !f.name.includes("Guid") && !techFields.includes(f.name) && f.name !== "IndicadorID")
+  );
   
   let sortedRows = [...currentRows];
   if(currentSort.col) {
@@ -292,7 +299,6 @@ function openModalForm(oid = null) {
   let html = "";
   let hiddenHtml = "";
 
-  // Campos automáticos inyectados por ArcGIS o por nuestro sistema que NO deben verse ni editarse
   const techFields = ["OBJECTID", "CreationDate", "Creator", "EditDate", "Editor", "PersonaUltimaEdicionID", "FechaUltimaEdicionFuncional", "PersonaID"];
   const parentTextF = PARENT_RULES[key]?.parentText;
 
@@ -303,13 +309,11 @@ function openModalForm(oid = null) {
     const dom = metaCache[key].domainsByField[f.name];
     const isFK = FK_MAPPING[f.name];
     
-    // Ocultar campo de texto redundante del padre (ej. ProyectoID en CFG_Objetivo)
     if(f.name === parentTextF) {
         hiddenHtml += `<input type="hidden" data-field="${f.name}" id="hidden-${f.name}" value="${esc(val)}" />`;
         return;
     }
 
-    // Listas desplegables para GlobalID / GUID
     if(f.name.includes("GlobalID") || f.name.includes("Guid")) {
         if(isFK && catalogs[isFK]) {
             let opts = catalogs[isFK].map(c => `<option value="${esc(c.GlobalID || c[f.name])}" ${val===(c.GlobalID || c[f.name])?'selected':''}>${esc(labelCatalog(isFK, c))}</option>`).join("");
@@ -340,7 +344,6 @@ function openModalForm(oid = null) {
     if(pSel) {
         pSel.addEventListener("change", (e) => {
             checkWeight(key);
-            // Auto-calcular e inyectar el código de texto del padre oculto
             if (parentTextF) {
                 const hInput = document.getElementById(`hidden-${parentTextF}`);
                 if(hInput) {
@@ -395,6 +398,7 @@ async function save() {
   if(res.error || (res.addResults && !res.addResults[0].success) || (res.updateResults && !res.updateResults[0].success)) throw new Error("Error en servidor al guardar.");
   
   document.getElementById("modal").classList.remove("is-open");
+  await loadCatalogs();
   await loadEntity(key);
 }
 
