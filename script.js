@@ -1,7 +1,7 @@
 /* ===========================================================
    DATA-PAC | Admin OAP V3 (script.js)
-   - OTP Auth, RBAC, Sorting, Formularios Reales, Auditoría
-   - MEJORAS: Corrección estricta de tipos de datos (Fechas/Números) para Updates en AGOL
+   - OTP Auth, RBAC, Sorting, Auditoría, Corrección Tipos
+   - MEJORA: Refactorización Genérica de Campos de Persona
    =========================================================== */
 
 const SERVICE_URL = "https://services6.arcgis.com/yq6pe3Lw2oWFjWtF/arcgis/rest/services/DATAPAC_V3/FeatureServer";
@@ -32,7 +32,7 @@ const FK_MAPPING = {
   PACGlobalID: "CFG_PAC", LineaGlobalID: "CFG_Linea", ProgramaGlobalID: "CFG_Programa",
   ProyectoGlobalID: "CFG_Proyecto", ObjetivoGlobalID: "CFG_Objetivo", ActividadGlobalID: "CFG_Actividad",
   SubActividadGlobalID: "CFG_SubActividad", TareaGlobalID: "CFG_Tarea", PersonaGlobalID: "SEG_Persona",
-  RolID: "SEG_Rol", ResponsableGlobalID: "SEG_Persona"
+  RolID: "SEG_Rol" // Los GUIDs de persona se manejan dinámicamente ahora.
 };
 
 const CHILDREN_RULES = [
@@ -48,6 +48,13 @@ const UNIQUE_FIELDS = {
   CFG_Objetivo: "ObjetivoID", CFG_Actividad: "ActividadID", CFG_SubActividad: "CodigoSubActividad", CFG_Tarea: "CodigoTarea"
 };
 
+// NUEVO: Motor Genérico de Campos de Persona
+const PERSON_FIELDS_CONFIG = {
+  REP_AvanceTarea: [ { textF: "Responsable", guidF: "ResponsableGlobalID" } ],
+  REP_ReporteNarrativo: [ { textF: "Responsable", guidF: "ResponsableGlobalID" } ]
+  // Listo para extenderse: WF_Solicitud: [{ textF: "Solicitante", guidF: "SolicitanteGlobalID" }, ...]
+};
+
 const SEARCH_FIELDS = {
   CFG_PAC: ["PACID", "Nombre"], CFG_Linea: ["LineaID", "Nombre"], CFG_Programa: ["ProgramaID", "Nombre"],
   CFG_Proyecto: ["ProyectoID", "Nombre"], CFG_Objetivo: ["ObjetivoID", "Nombre"],
@@ -59,6 +66,7 @@ const SEARCH_FIELDS = {
   SEG_Persona: ["PersonaID", "Nombre", "Cedula", "Correo"],
   SEG_Rol: ["RolID", "NombreRol"], SEG_Asignacion: ["Estado"],
   REP_AvanceTarea: ["Responsable", "Observaciones", "Periodo", "MotivoAjuste"],
+  REP_ReporteNarrativo: ["Responsable", "TextoNarrativo", "PrincipalesLogros", "DescripcionLogrosAlcanzados"],
   AUD_HistorialCambio: ["TipoObjeto", "ObjetoGlobalID", "CampoModificado", "ValorAnterior", "ValorNuevo", "MotivoCambio", "OrigenCambio"],
   AUD_EventoSistema: ["TipoEvento", "Entidad", "Resultado", "DetalleEvento"],
   WF_SolicitudRevision: ["EstadoActual", "ComentarioSolicitante"]
@@ -213,12 +221,8 @@ async function resolveHierarchy(alcances) {
 }
 
 function safeLabel(code, name) {
-    const c = code ? String(code).trim() : "";
-    const n = name ? String(name).trim() : "";
-    if (c && n) return `${c} - ${n}`;
-    if (c) return c;
-    if (n) return n;
-    return "(sin etiqueta)";
+    const c = code ? String(code).trim() : ""; const n = name ? String(name).trim() : "";
+    if (c && n) return `${c} - ${n}`; if (c) return c; if (n) return n; return "(sin etiqueta)";
 }
 
 function buildEntityLabel(entityKey, item) {
@@ -243,9 +247,7 @@ function buildEntityLabel(entityKey, item) {
 }
 
 async function loadCatalogs() {
-  const v = document.getElementById("sel-vigencia").value; 
-  const vigW = v ? `Vigencia=${v}` : "1=1";
-  
+  const v = document.getElementById("sel-vigencia").value; const vigW = v ? `Vigencia=${v}` : "1=1";
   async function fetchCat(k, nameF, extra=""){
     const w = (metaCache[k]?.fieldsByName?.["Vigencia"]) ? vigW : "1=1";
     const r = await fetchJson(`${entityUrl(k)}/query`, { f: "json", where: w, outFields: `GlobalID,${nameF}${extra}`, orderByFields: `${nameF} ASC`, returnGeometry: false });
@@ -254,16 +256,11 @@ async function loadCatalogs() {
   
   if(!metaCache["CFG_PAC"]) { for(let k of Object.keys(FK_MAPPING)) await getMeta(FK_MAPPING[k]); }
   
-  await fetchCat("CFG_PAC", "Nombre", ",PACID"); 
-  await fetchCat("CFG_Linea", "Nombre", ",LineaID");
-  await fetchCat("CFG_Programa", "Nombre", ",ProgramaID"); 
-  await fetchCat("CFG_Proyecto", "Nombre", ",ProyectoID");
-  await fetchCat("CFG_Objetivo", "Nombre", ",ObjetivoID"); 
-  await fetchCat("CFG_Actividad", "NombreActividad", ",ActividadID,Nombre");
-  await fetchCat("CFG_SubActividad", "NombreSubActividad", ",CodigoSubActividad"); 
-  await fetchCat("CFG_Tarea", "NombreTarea", ",CodigoTarea");
-  await fetchCat("SEG_Persona", "Nombre", ",Cedula,Correo,PersonaID"); 
-  await fetchCat("SEG_Rol", "NombreRol", ",RolID");
+  await fetchCat("CFG_PAC", "Nombre", ",PACID"); await fetchCat("CFG_Linea", "Nombre", ",LineaID");
+  await fetchCat("CFG_Programa", "Nombre", ",ProgramaID"); await fetchCat("CFG_Proyecto", "Nombre", ",ProyectoID");
+  await fetchCat("CFG_Objetivo", "Nombre", ",ObjetivoID"); await fetchCat("CFG_Actividad", "NombreActividad", ",ActividadID,Nombre");
+  await fetchCat("CFG_SubActividad", "NombreSubActividad", ",CodigoSubActividad"); await fetchCat("CFG_Tarea", "NombreTarea", ",CodigoTarea");
+  await fetchCat("SEG_Persona", "Nombre", ",Cedula,Correo,PersonaID"); await fetchCat("SEG_Rol", "NombreRol", ",RolID");
 }
 
 /* ===== 3. MENÚ DINÁMICO & SEGURIDAD ===== */
@@ -293,10 +290,8 @@ function buildDynamicMenu() {
 }
 
 function hasWritePermission(key) {
-  if(HARD_READONLY.has(key)) return false; 
-  if(SESSION.isSuperAdmin) return true;
-  if(SESSION.tablePermissions[key] === "Ver" || SESSION.maxPerm === "Ver") return false; 
-  return true;
+  if(HARD_READONLY.has(key)) return false; if(SESSION.isSuperAdmin) return true;
+  if(SESSION.tablePermissions[key] === "Ver" || SESSION.maxPerm === "Ver") return false; return true;
 }
 
 function buildSecurityWhere(key) {
@@ -382,7 +377,10 @@ window.toggleSort = function(col) {
 
 function renderTable() {
   const key = currentEntityKey, canWrite = hasWritePermission(key), canDel = canDelete();
-  const techFields = ["CreationDate", "Creator", "EditDate", "Editor", "PersonaUltimaEdicionID", "FechaUltimaEdicionFuncional", "PersonaID", "ResponsableGlobalID"];
+  const techFields = ["CreationDate", "Creator", "EditDate", "Editor", "PersonaUltimaEdicionID", "FechaUltimaEdicionFuncional", "PersonaID"];
+  
+  // Limpieza dinámica de todos los GUIDs de persona de la tabla
+  if (PERSON_FIELDS_CONFIG[key]) { PERSON_FIELDS_CONFIG[key].forEach(c => techFields.push(c.guidF)); }
   
   let fields = metaCache[key].fields.filter(f => 
     f.name === "OBJECTID" || (!f.name.includes("GlobalID") && !f.name.includes("Guid") && !techFields.includes(f.name) && f.name !== "IndicadorID" && !(key === "CFG_Actividad" && f.name === "Nombre"))
@@ -460,7 +458,7 @@ window.confirmDelete = async function(oid) {
   }
 };
 
-/* ===== 6. FORMULARIOS CON TIPADO ESTRICTO DE FECHA ===== */
+/* ===== 6. FORMULARIOS REALES ORDENADOS ===== */
 function openModalForm(oid = null) {
   const key = currentEntityKey; 
   editingRow = oid ? currentRows.find(x => x.attributes.OBJECTID === oid) : null;
@@ -477,6 +475,7 @@ function openModalForm(oid = null) {
   let sortedFields = [...metaCache[key].fields];
   const parentFk = PARENT_RULES[key]?.fk;
   
+  // Ordenar: 1° Llave Padre, 2° Campos de Personas
   sortedFields.sort((a, b) => {
       if (a.name === parentFk) return -1;
       if (b.name === parentFk) return 1;
@@ -486,12 +485,12 @@ function openModalForm(oid = null) {
           if (a.name === "TareaGlobalID") return -1;
           if (b.name === "TareaGlobalID") return 1;
       }
-      if (key === "REP_AvanceTarea") {
-          if (a.name === "TareaGlobalID") return -1;
-          if (b.name === "TareaGlobalID") return 1;
-          if (a.name === "ResponsableGlobalID") return -1;
-          if (b.name === "ResponsableGlobalID") return 1;
-      }
+      
+      const isAPerson = PERSON_FIELDS_CONFIG[key]?.some(c => c.guidF === a.name);
+      const isBPerson = PERSON_FIELDS_CONFIG[key]?.some(c => c.guidF === b.name);
+      if (isAPerson && !isBPerson) return -1;
+      if (!isAPerson && isBPerson) return 1;
+      
       return 0;
   });
 
@@ -502,42 +501,53 @@ function openModalForm(oid = null) {
     const dom = metaCache[key].domainsByField[f.name];
     const isFK = FK_MAPPING[f.name];
     
-    // Ocultar campos de texto dependientes de UI
-    if(f.name === parentTextF || (key === "CFG_Actividad" && f.name === "Nombre") || (key === "REP_AvanceTarea" && f.name === "Responsable")) {
-        // Se añade data-type para que el tipado fuerte también actúe en los ocultos si fuera necesario
+    if(f.name === parentTextF || (key === "CFG_Actividad" && f.name === "Nombre")) {
         hiddenHtml += `<input type="hidden" data-field="${f.name}" data-type="${f.type}" id="hidden-${f.name}" value="${esc(val)}" />`; 
         return;
     }
     
-    // CASO ESPECIAL: ResponsableGlobalID en REP_AvanceTarea
-    if(key === "REP_AvanceTarea" && f.name === "ResponsableGlobalID") {
-        let currentFkVal = val;
-        let oldNameHint = "";
-        
-        if (editingRow && !currentFkVal) {
-             const oldName = editingRow.attributes["Responsable"];
-             if (oldName) {
-                 const matches = catalogs["SEG_Persona"]?.filter(p => p.Nombre && p.Nombre.trim().toLowerCase() === oldName.trim().toLowerCase());
-                 if (matches && matches.length === 1) {
-                     currentFkVal = matches[0].GlobalID; 
-                 } else {
-                     oldNameHint = `(Antiguo: ${esc(oldName)})`;
-                 }
-             }
+    // GESTIÓN GENÉRICA DE PERSONAS
+    if (PERSON_FIELDS_CONFIG[key]) {
+        const pConf = PERSON_FIELDS_CONFIG[key].find(c => c.textF === f.name || c.guidF === f.name);
+        if (pConf) {
+            // Esconder el campo de texto libre
+            if (f.name === pConf.textF) {
+                hiddenHtml += `<input type="hidden" data-field="${f.name}" data-type="${f.type}" id="hidden-${f.name}" value="${esc(val)}" />`;
+                return;
+            }
+            // Renderizar el Selector GUID
+            if (f.name === pConf.guidF) {
+                let currentFkVal = val;
+                let oldNameHint = "";
+                
+                // Auto-resolución de registros históricos por coincidencia exacta de nombre
+                if (editingRow && !currentFkVal) {
+                     const oldName = editingRow.attributes[pConf.textF];
+                     if (oldName) {
+                         const matches = catalogs["SEG_Persona"]?.filter(p => p.Nombre && p.Nombre.trim().toLowerCase() === oldName.trim().toLowerCase());
+                         if (matches && matches.length === 1) {
+                             currentFkVal = matches[0].GlobalID; 
+                         } else {
+                             oldNameHint = `(Antiguo: ${esc(oldName)})`;
+                         }
+                     }
+                }
+                
+                let opts = catalogs["SEG_Persona"].map(c => `<option value="${esc(c.GlobalID)}" ${currentFkVal===c.GlobalID?'selected':''}>${esc(buildEntityLabel("SEG_Persona", c))}</option>`).join("");
+                html += `<div class="field">
+                            <label>${f.alias} <span style="color:#d64545">*</span></label>
+                            <select data-field="${f.name}" data-type="${f.type}" id="sel-${f.name}">
+                                <option value="">- Seleccione ${f.alias.replace(' ID','')} - ${oldNameHint}</option>
+                                ${opts}
+                            </select>
+                            ${oldNameHint ? `<span class="help-text" style="color:#d64545;">Debe reasignar una persona válida de la lista.</span>` : ''}
+                         </div>`;
+                return;
+            }
         }
-        
-        let opts = catalogs["SEG_Persona"].map(c => `<option value="${esc(c.GlobalID)}" ${currentFkVal===c.GlobalID?'selected':''}>${esc(buildEntityLabel("SEG_Persona", c))}</option>`).join("");
-        html += `<div class="field">
-                    <label>${f.alias} <span style="color:#d64545">*</span></label>
-                    <select data-field="${f.name}" data-type="${f.type}" id="sel-responsable">
-                        <option value="">- Seleccione Responsable - ${oldNameHint}</option>
-                        ${opts}
-                    </select>
-                    ${oldNameHint ? `<span class="help-text" style="color:#d64545;">Debe reasignar un responsable válido de la lista.</span>` : ''}
-                 </div>`;
-        return;
     }
     
+    // Selects tradicionales (FK y Dominios)
     if(f.name.includes("GlobalID") || f.name.includes("Guid")) {
         if(isFK && catalogs[isFK]) {
             let opts = catalogs[isFK].map(c => `<option value="${esc(c.GlobalID || c[f.name])}" ${val===(c.GlobalID || c[f.name])?'selected':''}>${esc(buildEntityLabel(isFK, c))}</option>`).join("");
@@ -551,13 +561,13 @@ function openModalForm(oid = null) {
       html += `<div class="field"><label>${f.alias}</label><select data-field="${f.name}" data-type="${f.type}"><option value="">- Selecciona -</option>${opts}</select></div>`;
     } 
     else {
+      // Inputs estándar
       const isWeight = PARENT_RULES[key]?.weight === f.name;
       const isDate = f.type === "esriFieldTypeDate";
       const type = isDate ? "date" : ((f.name.includes("Peso") || f.name.includes("Valor") || f.type==="esriFieldTypeDouble" || f.type==="esriFieldTypeInteger" || f.type==="esriFieldTypeSmallInteger") ? "number" : "text");
 
       let inputVal = val;
       if (isDate && val) {
-          // Convertir Epoch a YYYY-MM-DD ajustando por zona horaria local
           const d = new Date(val);
           inputVal = new Date(d.getTime() - (d.getTimezoneOffset() * 60000)).toISOString().split('T')[0];
       }
@@ -639,7 +649,6 @@ async function save() {
   
   if(metaCache[key].fieldsByName["PersonaUltimaEdicionID"]) attrs.PersonaUltimaEdicionID = SESSION.personaID;
 
-  // LÓGICA FUERTE DE TIPOS PARA POST
   formDyn.querySelectorAll("[data-field]").forEach(el => { 
     let v = el.value; 
     const fType = el.getAttribute("data-type");
@@ -649,14 +658,12 @@ async function save() {
     } else if (el.type === "number" || fType === "esriFieldTypeDouble" || fType === "esriFieldTypeInteger" || fType === "esriFieldTypeSmallInteger") {
         v = Number(v);
     } else if (el.type === "date" || fType === "esriFieldTypeDate") {
-        // Asegurar que si es un string de fecha pase a Epoch MS, o mantener si ya es epoch.
         if (v.includes("-")) {
             v = new Date(v + "T12:00:00Z").getTime();
         } else {
             v = Number(v);
         }
     }
-
     attrs[el.getAttribute("data-field")] = v; 
   });
 
@@ -665,26 +672,29 @@ async function save() {
 
   if(key === "CFG_Actividad") attrs["Nombre"] = attrs["NombreActividad"];
 
-  if (key === "REP_AvanceTarea") {
-      const respGid = attrs["ResponsableGlobalID"];
-      if (!respGid) {
-          const inputEl = document.getElementById("sel-responsable");
-          if(inputEl) { inputEl.classList.add("field-error"); inputEl.focus(); }
-          throw new Error("Debe seleccionar un responsable válido de la lista.");
-      }
-      
-      const personObj = catalogs["SEG_Persona"]?.find(p => p.GlobalID === respGid);
-      if (!personObj) throw new Error("El responsable seleccionado no pudo resolverse en el catálogo SEG_Persona.");
-      
-      attrs["Responsable"] = personObj.Nombre;
+  // VALIDACIÓN FUERTE GENÉRICA PARA CAMPOS DE PERSONA
+  if (PERSON_FIELDS_CONFIG[key]) {
+      for (let pConf of PERSON_FIELDS_CONFIG[key]) {
+          const selGid = attrs[pConf.guidF];
+          
+          if (!selGid) {
+              const inputEl = document.getElementById(`sel-${pConf.guidF}`);
+              if(inputEl) { inputEl.classList.add("field-error"); inputEl.focus(); }
+              throw new Error(`Debe seleccionar una opción válida para ${pConf.textF} de la lista.`);
+          }
+          
+          const personObj = catalogs["SEG_Persona"]?.find(p => p.GlobalID === selGid);
+          if (!personObj) throw new Error(`La persona seleccionada no pudo resolverse en el catálogo general.`);
+          
+          // La fuente de verdad del texto siempre es el catálogo
+          attrs[pConf.textF] = personObj.Nombre;
 
-      if (isUpdate) {
-          console.log("--- DEPURACIÓN UPDATE REP_AvanceTarea ---");
-          console.log("Registro Original:", originalAttrs);
-          console.log("Persona Seleccionada (GUID):", respGid);
-          console.log("Persona Seleccionada (Nombre):", attrs["Responsable"]);
-          console.log("Payload a enviar:", attrs);
-          console.log("-----------------------------------------");
+          if (isUpdate) {
+              console.log(`--- DEPURACIÓN UPDATE ${key} ---`);
+              console.log(`Campo Sincronizado: ${pConf.textF}`);
+              console.log("Persona Seleccionada (GUID):", selGid);
+              console.log("Persona Seleccionada (Nombre):", attrs[pConf.textF]);
+          }
       }
   }
 
@@ -720,7 +730,6 @@ async function save() {
           throw new Error(`Error al crear: ${errDesc}`);
       }
       
-      // MOSTRAR EL ERROR REAL DEVUELTO POR ARCGIS
       if (res.updateResults && res.updateResults.length > 0 && !res.updateResults[0].success) {
           const errDesc = res.updateResults[0].error?.description || res.updateResults[0].error?.message || "Error desconocido";
           throw new Error(`Error al actualizar: ${errDesc}`);
