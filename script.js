@@ -228,7 +228,10 @@ async function getMeta(key){
   const m = await fetchJson(`${entityUrl(key)}?f=pjson`);
   const fieldsByName = {}, domainsByField = {};
   m.fields.forEach(f => { fieldsByName[f.name] = f; if(f.domain?.codedValues) domainsByField[f.name] = f.domain.codedValues; });
-  metaCache[key] = { fields, fieldsByName, domainsByField }; return metaCache[key];
+  
+  // EL ERROR ESTABA AQUÍ: Se cambió "fields" por "fields: m.fields"
+  metaCache[key] = { fields: m.fields, fieldsByName, domainsByField }; 
+  return metaCache[key];
 }
 
 async function loadEntity(key) {
