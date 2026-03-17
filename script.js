@@ -4,6 +4,7 @@
    =========================================================== */
 
 const SERVICE_URL = "https://services6.arcgis.com/yq6pe3Lw2oWFjWtF/arcgis/rest/services/DATAPAC_V3/FeatureServer";
+const URL_WEBHOOK_POWERAUTOMATE = "https://default64f30d63182749d899511db17d0949.e4.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/1123b3fd4a854b40b2b22dd45b03ca7c/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=Qz68D2G5RAq9cmMvOew1roy8bD3YQPtju4KPW2vEtvc";
 
 /* ===== Entidades V3 ===== */
 const ENTITY = {
@@ -81,24 +82,55 @@ async function postForm(url, obj){
    =========================================================== */
 document.getElementById("btn-request-otp").addEventListener("click", async () => {
   const ced = document.getElementById("inp-cedula").value.trim();
-  const cor = document.getElementById("inp-correo").value.trim();
+  const cor = document.getElementById("inp-correo").value.trim().toLowerCase();
+  const btn = document.getElementById("btn-request-otp");
+  
   if(!ced || !cor) return setStatus("Ingresa cédula y correo.", "error", true);
   
-  setStatus("Verificando usuario...", "info", true);
+  btn.disabled = true;
+  btn.textContent = "Validando usuario...";
+  setStatus("Verificando en base de datos...", "info", true);
+  
   try {
-    const res = await fetchJson(entityUrl("SEG_Persona")+"/query", { f:"json", where:`Cedula='${ced}' AND Correo='${cor}' AND Activo='SI'`, outFields:"GlobalID,PersonaID,Nombre", returnGeometry:false });
-    if(!res.features || res.features.length === 0) throw new Error("Credenciales inválidas o usuario inactivo.");
+    // 1. Validación previa en el Frontend (Asegura que exista en V3)
+    const res = await fetchJson(entityUrl("SEG_Persona")+"/query", { 
+      f:"json", 
+      where:`Cedula='${ced}' AND Correo='${cor}' AND Activo='SI'`, 
+      outFields:"GlobalID,PersonaID,Nombre", 
+      returnGeometry:false 
+    });
+    
+    if(!res.features || res.features.length === 0) {
+      throw new Error("Credenciales inválidas o usuario inactivo.");
+    }
     
     const p = res.features[0].attributes;
     SESSION.personaGlobalID = p.GlobalID;
     SESSION.personaID = p.PersonaID;
     SESSION.nombre = p.Nombre;
 
-    // Aquí Power Automate enviaría el correo al detectar el intento.
-    document.getElementById("otp-step-1").classList.add("is-hidden");
-    document.getElementById("otp-step-2").classList.remove("is-hidden");
-    setStatus("Código enviado. Revisa tu correo.", "success", true);
-  } catch(e) { setStatus(e.message, "error", true); }
+    // 2. Llamado al Webhook de Power Automate
+    btn.textContent = "Generando código...";
+    const webhookRes = await fetch(URL_WEBHOOK_POWERAUTOMATE, {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({cedula: ced, correo: cor})
+    });
+
+    if(webhookRes.status === 200 || webhookRes.status === 202) {
+        document.getElementById("otp-step-1").classList.add("is-hidden");
+        document.getElementById("otp-step-2").classList.remove("is-hidden");
+        setStatus("Código enviado. Revisa tu correo.", "success", true);
+    } else {
+        throw new Error(`Error en Power Automate (Status: ${webhookRes.status}).`);
+    }
+
+  } catch(e) { 
+    setStatus(e.message, "error", true); 
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Solicitar Código";
+  }
 });
 
 document.getElementById("btn-verify-otp").addEventListener("click", async () => {
