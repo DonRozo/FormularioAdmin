@@ -81,7 +81,6 @@ button:hover, .btn:hover { box-shadow: 0 6px 16px rgba(15,23,42,0.12); transform
 .tbl th, .tbl td { padding: 12px 14px; border-bottom: 1px solid var(--border); text-align: left; font-size: 13px; }
 .tbl thead th { background: #f8fafc; font-weight: 800; color: var(--muted); position: sticky; top: 0; z-index: 10; white-space: nowrap;}
 .tbl tbody tr:hover td { background: rgba(23,151,209,0.04); }
-
 th.sortable { cursor: pointer; user-select: none; transition: background 0.1s; }
 th.sortable:hover { background: #e2e8f0; color: var(--primary-2); }
 th.sort-asc::after { content: " ↑"; color: var(--primary); font-weight: bold; }
@@ -101,14 +100,15 @@ th.sort-desc::after { content: " ↓"; color: var(--primary); font-weight: bold;
 .field label { font-size: 12px; font-weight: 800; color: rgba(14,23,30,0.85); }
 .field input, .field select, .field textarea {
   width: 100%; padding: 11px 12px; border-radius: 10px; border: 1.5px solid var(--border-strong);
-  background: #fff; outline: none; font-size: 13px; font-family: inherit;
+  background: #fff; outline: none; font-size: 13px; font-family: inherit; transition: all 0.2s;
 }
 .field input:focus, .field select:focus, .field textarea:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(23,151,209,0.15); }
 .field input:disabled, .field select:disabled { background: #f1f5f9; color: #94a3b8; cursor: not-allowed; }
 .field__meta { display: flex; justify-content: space-between; align-items: center; margin-top: 2px; }
 .help-text { font-size: 11px; color: var(--muted); }
-.charcount { font-size: 11px; font-weight: 800; color: var(--muted); background: #f1f5f9; padding: 2px 8px; border-radius: var(--pill); }
-.charcount.is-low { color: #b45309; background: #fef3c7; }
+
+/* Feedback de error para validación */
+.field-error { border-color: #d64545 !important; box-shadow: 0 0 0 3px rgba(214,69,69,0.15) !important; }
 
 /* LOGIN OVERLAY OTP V3 */
 .login-overlay, .otp-overlay { position: fixed; inset: 0; background: rgba(14,23,30,0.85); backdrop-filter: blur(8px); display: flex; justify-content: center; align-items: center; z-index: 10000; }
