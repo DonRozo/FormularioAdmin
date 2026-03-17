@@ -1,7 +1,7 @@
 /* ===========================================================
    DATA-PAC | Admin OAP V3 (script.js)
    - OTP Auth, RBAC, Sorting, Formularios Reales, Pesos, Auto-cálculo IDs
-   - Tablas limpias (sin metadatos ArcGIS ni GUIDs)
+   - UX mejorada: Textareas, Spellcheck, Alertas de Borrado, Carga visual
    =========================================================== */
 
 const SERVICE_URL = "https://services6.arcgis.com/yq6pe3Lw2oWFjWtF/arcgis/rest/services/DATAPAC_V3/FeatureServer";
@@ -18,7 +18,7 @@ const ENTITY = {
 
 const HARD_READONLY = new Set(["AUD_HistorialCambio", "AUD_EventoSistema", "BI_AvanceActividad", "BI_AvanceObjetivo", "BI_AvanceProyecto", "BI_AvancePrograma", "BI_AvanceLinea", "BI_AvancePAC", "FIN_TodoGasto", "FIN_ResumenTodoGastoActividad", "REP_AvanceSubActividad", "REP_AvanceActividad", "SEG_OTP"]);
 
-// Reglas V2 Restauradas y mejoradas con parentText (para auto-cálculo)
+// Reglas de Relaciones y Auto-cálculo
 const PARENT_RULES = {
   CFG_Linea: { fk: "PACGlobalID", parent: "CFG_PAC", weight: "Peso", parentText: "PACID" },
   CFG_Programa: { fk: "LineaGlobalID", parent: "CFG_Linea", weight: "Peso", parentText: "LineaID" },
@@ -251,7 +251,7 @@ window.toggleSort = function(col) {
 function renderTable() {
   const key = currentEntityKey, canWrite = hasWritePermission(key), canDel = canDelete();
   
-  // Ocultar campos de sistema (Metadatos ArcGIS y Auditoría) en la tabla visual
+  // Ocultar campos de sistema en la tabla
   const techFields = ["CreationDate", "Creator", "EditDate", "Editor", "PersonaUltimaEdicionID", "FechaUltimaEdicionFuncional", "PersonaID"];
   
   let fields = metaCache[key].fields.filter(f => 
@@ -289,7 +289,44 @@ function renderTable() {
   }).join("");
 }
 
-/* ===== 5. FORMULARIOS REALES CON AUTO-CÁLCULO ===== */
+// NUEVA FUNCIÓN: Alerta y borrado desde la tabla
+window.confirmDelete = async function(oid) {
+  const key = currentEntityKey;
+  if (!canDelete()) return;
+  
+  const row = currentRows.find(x => x.attributes.OBJECTID === oid);
+  if (!row) return;
+
+  if (!confirm(`¿Estás seguro de que deseas eliminar este registro de ${key}? Esta acción es irreversible.`)) {
+    return;
+  }
+
+  setStatus("Verificando dependencias...", "info");
+  try {
+    const parentGid = row.attributes.GlobalID;
+    if (parentGid) {
+      for (let r of CHILDREN_RULES.filter(x => x.parent === key)) {
+        const check = await fetchJson(`${entityUrl(r.child)}/query`, { f:"json", where:`${r.fk}='${parentGid}'`, outFields:"OBJECTID", returnGeometry:false });
+        if (check.features?.length > 0) {
+            alert(`⚠️ NO SE PUEDE ELIMINAR:\nEste registro tiene elementos hijos en la tabla [${r.child}].\n\nDebes eliminar primero los hijos vinculados.`);
+            throw new Error(`Dependencias encontradas en ${r.child}.`);
+        }
+      }
+    }
+    
+    // Si no hay hijos, proceder a borrar
+    const res = await postForm(`${entityUrl(key)}/applyEdits`, { deletes: String(oid) });
+    if(res.deleteResults && res.deleteResults.length > 0 && !res.deleteResults[0].success) throw new Error("Error en el servidor al eliminar.");
+    
+    await loadCatalogs();
+    await loadEntity(key);
+    setStatus("Registro eliminado exitosamente.", "success");
+  } catch(e) {
+    setStatus(e.message, "error");
+  }
+};
+
+/* ===== 5. FORMULARIOS REALES CON AUTO-CÁLCULO Y ORTOGRAFÍA ===== */
 function openModalForm(oid = null) {
   const key = currentEntityKey; editingRow = oid ? currentRows.find(x => x.attributes.OBJECTID === oid) : null;
   document.getElementById("modal-title").textContent = oid ? `Editar ${key}` : `Nuevo ${key}`;
@@ -301,6 +338,9 @@ function openModalForm(oid = null) {
 
   const techFields = ["OBJECTID", "CreationDate", "Creator", "EditDate", "Editor", "PersonaUltimaEdicionID", "FechaUltimaEdicionFuncional", "PersonaID"];
   const parentTextF = PARENT_RULES[key]?.parentText;
+  
+  // Campos que necesitan ser grandes para escribir mucho texto
+  const largeTextFields = ["Definicion", "ObservacionesPlaneacion", "TextoNarrativo", "PrincipalesLogros", "DescripcionLogrosAlcanzados", "Observaciones", "DescripcionSitio"];
 
   metaCache[key].fields.forEach(f => {
     if(techFields.includes(f.name)) return;
@@ -327,12 +367,20 @@ function openModalForm(oid = null) {
       html += `<div class="field"><label>${f.alias}</label><select data-field="${f.name}"><option value="">- Selecciona -</option>${opts}</select></div>`;
     } 
     else {
-      const type = (f.name.includes("Peso") || f.name.includes("Valor") || f.type==="esriFieldTypeDouble") ? "number" : "text";
       const isWeight = PARENT_RULES[key]?.weight === f.name;
-      html += `<div class="field"><label>${f.alias}</label>
-        <input type="${type}" data-field="${f.name}" value="${esc(val)}" ${isWeight?'step="0.01"':''} />
-        ${isWeight ? `<span class="weight-helper" style="font-size:11px; font-weight:bold; margin-top:4px;"></span>` : ''}
-      </div>`;
+      const type = (f.name.includes("Peso") || f.name.includes("Valor") || f.type==="esriFieldTypeDouble") ? "number" : "text";
+      
+      if (largeTextFields.includes(f.name)) {
+          html += `<div class="field"><label>${f.alias}</label>
+            <textarea data-field="${f.name}" rows=\"4\" spellcheck=\"true\" lang=\"es\">${esc(val)}</textarea>
+          </div>`;
+      } else {
+          const spellAttr = type === "text" ? 'spellcheck=\"true\" lang=\"es\"' : '';
+          html += `<div class="field"><label>${f.alias}</label>
+            <input type="${type}" data-field="${f.name}" value="${esc(val)}" ${isWeight?'step="0.01"':''} ${spellAttr} />
+            ${isWeight ? `<span class="weight-helper" style="font-size:11px; font-weight:bold; margin-top:4px;"></span>` : ''}
+          </div>`;
+      }
     }
   });
 
@@ -396,12 +444,11 @@ async function save() {
   const p = editingRow ? { updates: [{attributes:attrs}] } : { adds: [{attributes:attrs}] };
   const res = await postForm(url, p);
   
-  // FIX: Validación segura de la respuesta de ArcGIS
+  // Validación segura de la respuesta de ArcGIS
   if (res.error) throw new Error(res.error.message || "Error en el servidor.");
   if (res.addResults && res.addResults.length > 0 && !res.addResults[0].success) throw new Error("Error al crear el registro.");
   if (res.updateResults && res.updateResults.length > 0 && !res.updateResults[0].success) throw new Error("Error al actualizar el registro.");
   
-  // Si todo sale bien, cerramos el modal y recargamos la tabla
   document.getElementById("modal").classList.remove("is-open");
   await loadCatalogs();
   await loadEntity(key);
@@ -410,40 +457,59 @@ async function save() {
 document.getElementById("btn-save").addEventListener("click", async () => {
   const btn = document.getElementById("btn-save"); 
   const originalText = btn.textContent;
-  
   try { 
-    // UX: Feedback visual inmediato
     btn.disabled = true; 
     btn.textContent = "Guardando... ⏳"; 
     setStatus("Enviando datos al servidor...", "info");
-    
     await save(); 
-    
     setStatus("Guardado con éxito.", "success"); 
   } catch(e) { 
     setStatus(e.message, "error"); 
   } finally { 
-    // Restaurar el botón en caso de error o para futuros usos
     btn.disabled = false; 
     btn.textContent = originalText;
   }
 });
 
-/* ===== 6. BORRADO CON REGLAS ===== */
+/* ===== 6. BORRADO CON REGLAS DESDE EL MODAL ===== */
 document.getElementById("btn-delete").addEventListener("click", async () => {
-  const key = currentEntityKey; if(!editingRow || !canDelete()) return;
-  const btn = document.getElementById("btn-delete"); btn.disabled=true;
+  const key = currentEntityKey; 
+  if(!editingRow || !canDelete()) return;
+  
+  if (!confirm(`¿Estás seguro de que deseas eliminar este registro de ${key}? Esta acción es irreversible.`)) {
+    return;
+  }
+
+  const btn = document.getElementById("btn-delete"); 
+  btn.disabled = true;
+  btn.textContent = "Eliminando... ⏳";
+  setStatus("Verificando dependencias...", "info");
+  
   try {
     const parentGid = editingRow.attributes.GlobalID;
     if(parentGid) {
       for(let r of CHILDREN_RULES.filter(x => x.parent === key)) {
         const check = await fetchJson(`${entityUrl(r.child)}/query`, { f:"json", where:`${r.fk}='${parentGid}'`, outFields:"OBJECTID", returnGeometry:false });
-        if(check.features?.length > 0) throw new Error(`No se puede eliminar: tiene registros hijos en ${r.child}.`);
+        if(check.features?.length > 0) {
+            alert(`⚠️ NO SE PUEDE ELIMINAR:\nEste registro tiene elementos hijos en la tabla [${r.child}].\n\nDebes eliminar primero los hijos vinculados.`);
+            throw new Error(`Dependencias encontradas en ${r.child}.`);
+        }
       }
     }
-    await postForm(`${entityUrl(key)}/applyEdits`, { deletes: String(editingRow.attributes.OBJECTID) });
-    document.getElementById("modal").classList.remove("is-open"); await loadEntity(key); setStatus("Eliminado.", "success");
-  } catch(e) { setStatus(e.message, "error"); } finally { btn.disabled=false; }
+    
+    const res = await postForm(`${entityUrl(key)}/applyEdits`, { deletes: String(editingRow.attributes.OBJECTID) });
+    if(res.deleteResults && res.deleteResults.length > 0 && !res.deleteResults[0].success) throw new Error("Error en el servidor al eliminar.");
+    
+    document.getElementById("modal").classList.remove("is-open"); 
+    await loadCatalogs();
+    await loadEntity(key); 
+    setStatus("Registro eliminado exitosamente.", "success");
+  } catch(e) { 
+    setStatus(e.message, "error"); 
+  } finally { 
+    btn.disabled = false;
+    btn.textContent = "Eliminar";
+  }
 });
 
 /* ===== 7. EVENTOS GENERALES ===== */
