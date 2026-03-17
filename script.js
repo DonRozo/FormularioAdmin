@@ -61,8 +61,16 @@ function canDelete(){ return SESSION.isSuperAdmin; }
 function generateGUID() { return '{' + crypto.randomUUID().toUpperCase() + '}'; }
 
 async function fetchJson(url, params){
-  const u = new URL(url); Object.entries(params||{}).forEach(([k,v])=>u.searchParams.set(k,v));
-  const r = await fetch(u.toString(), { method:"GET" }); if(!r.ok) throw new Error(`HTTP ${r.status}`); return await r.json();
+  const u = new URL(url); 
+  Object.entries(params||{}).forEach(([k,v])=>u.searchParams.set(k,v));
+  
+  // PARCHE: Añadimos una estampa de tiempo para evitar la caché fantasma del navegador
+  u.searchParams.set('_ts', Date.now()); 
+  
+  // Forzamos "no-store" para que siempre consulte la base de datos real
+  const r = await fetch(u.toString(), { method:"GET", cache: "no-store" }); 
+  if(!r.ok) throw new Error(`HTTP ${r.status}`); 
+  return await r.json();
 }
 async function postForm(url, obj){
   const form = new URLSearchParams(); form.append("f", "json");
@@ -316,7 +324,12 @@ window.confirmDelete = async function(oid) {
     
     // Si no hay hijos, proceder a borrar
     const res = await postForm(`${entityUrl(key)}/applyEdits`, { deletes: String(oid) });
-    if(res.deleteResults && res.deleteResults.length > 0 && !res.deleteResults[0].success) throw new Error("Error en el servidor al eliminar.");
+    
+    // Validación estricta del borrado en ArcGIS
+    if (res.error) throw new Error(res.error.message || "Error en el servidor al eliminar.");
+    if (res.deleteResults && res.deleteResults.length > 0 && !res.deleteResults[0].success) {
+      throw new Error(`AGOL rechazó el borrado: ${res.deleteResults[0].error?.description || "Error desconocido"}`);
+    }
     
     await loadCatalogs();
     await loadEntity(key);
