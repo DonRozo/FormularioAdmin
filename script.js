@@ -1,7 +1,7 @@
 /* ===========================================================
    DATA-PAC | Admin OAP V3 (script.js)
-   - OTP Auth, RBAC, Sorting, Auditoría, Corrección Tipos
-   - MEJORA: Refactorización Genérica de Campos de Persona
+   - OTP Auth, RBAC, Sorting, Auditoría, Personas Genéricas
+   - MEJORA: Clonación Segura, Validaciones de Topes Acumulados (PLAN_TareaVigencia)
    =========================================================== */
 
 const SERVICE_URL = "https://services6.arcgis.com/yq6pe3Lw2oWFjWtF/arcgis/rest/services/DATAPAC_V3/FeatureServer";
@@ -32,7 +32,7 @@ const FK_MAPPING = {
   PACGlobalID: "CFG_PAC", LineaGlobalID: "CFG_Linea", ProgramaGlobalID: "CFG_Programa",
   ProyectoGlobalID: "CFG_Proyecto", ObjetivoGlobalID: "CFG_Objetivo", ActividadGlobalID: "CFG_Actividad",
   SubActividadGlobalID: "CFG_SubActividad", TareaGlobalID: "CFG_Tarea", PersonaGlobalID: "SEG_Persona",
-  RolID: "SEG_Rol" // Los GUIDs de persona se manejan dinámicamente ahora.
+  RolID: "SEG_Rol"
 };
 
 const CHILDREN_RULES = [
@@ -48,11 +48,9 @@ const UNIQUE_FIELDS = {
   CFG_Objetivo: "ObjetivoID", CFG_Actividad: "ActividadID", CFG_SubActividad: "CodigoSubActividad", CFG_Tarea: "CodigoTarea"
 };
 
-// NUEVO: Motor Genérico de Campos de Persona
 const PERSON_FIELDS_CONFIG = {
   REP_AvanceTarea: [ { textF: "Responsable", guidF: "ResponsableGlobalID" } ],
   REP_ReporteNarrativo: [ { textF: "Responsable", guidF: "ResponsableGlobalID" } ]
-  // Listo para extenderse: WF_Solicitud: [{ textF: "Solicitante", guidF: "SolicitanteGlobalID" }, ...]
 };
 
 const SEARCH_FIELDS = {
@@ -62,7 +60,7 @@ const SEARCH_FIELDS = {
   CFG_SubActividad: ["CodigoSubActividad", "NombreSubActividad", "SiglaVariable"],
   CFG_Tarea: ["CodigoTarea", "NombreTarea"],
   PLAN_SubActividadVigencia: ["UnidadMedida", "SiglaVariable"],
-  PLAN_TareaVigencia: ["UnidadMedida"],
+  PLAN_TareaVigencia: ["UnidadMedida", "ObservacionReglaAvance"],
   SEG_Persona: ["PersonaID", "Nombre", "Cedula", "Correo"],
   SEG_Rol: ["RolID", "NombreRol"], SEG_Asignacion: ["Estado"],
   REP_AvanceTarea: ["Responsable", "Observaciones", "Periodo", "MotivoAjuste"],
@@ -190,6 +188,11 @@ async function initSession() {
     document.getElementById("otp-overlay").style.display = "none"; uiApp.style.display = "flex";
     document.getElementById("pill-user").textContent = `Usuario: ${SESSION.nombre} (${SESSION.roles.join(", ")})`;
     buildDynamicMenu();
+    
+    // Si es SUPERADMIN, habilitar botón de Clonación
+    if (SESSION.isSuperAdmin) {
+        document.getElementById("btn-open-clone").style.display = "inline-flex";
+    }
   } catch(e) { setStatus(e.message, "error", true); }
 }
 
@@ -379,7 +382,6 @@ function renderTable() {
   const key = currentEntityKey, canWrite = hasWritePermission(key), canDel = canDelete();
   const techFields = ["CreationDate", "Creator", "EditDate", "Editor", "PersonaUltimaEdicionID", "FechaUltimaEdicionFuncional", "PersonaID"];
   
-  // Limpieza dinámica de todos los GUIDs de persona de la tabla
   if (PERSON_FIELDS_CONFIG[key]) { PERSON_FIELDS_CONFIG[key].forEach(c => techFields.push(c.guidF)); }
   
   let fields = metaCache[key].fields.filter(f => 
@@ -458,7 +460,7 @@ window.confirmDelete = async function(oid) {
   }
 };
 
-/* ===== 6. FORMULARIOS REALES ORDENADOS ===== */
+/* ===== 6. FORMULARIOS DINÁMICOS Y LÓGICA DE TOPES ===== */
 function openModalForm(oid = null) {
   const key = currentEntityKey; 
   editingRow = oid ? currentRows.find(x => x.attributes.OBJECTID === oid) : null;
@@ -475,7 +477,6 @@ function openModalForm(oid = null) {
   let sortedFields = [...metaCache[key].fields];
   const parentFk = PARENT_RULES[key]?.fk;
   
-  // Ordenar: 1° Llave Padre, 2° Campos de Personas
   sortedFields.sort((a, b) => {
       if (a.name === parentFk) return -1;
       if (b.name === parentFk) return 1;
@@ -485,12 +486,10 @@ function openModalForm(oid = null) {
           if (a.name === "TareaGlobalID") return -1;
           if (b.name === "TareaGlobalID") return 1;
       }
-      
       const isAPerson = PERSON_FIELDS_CONFIG[key]?.some(c => c.guidF === a.name);
       const isBPerson = PERSON_FIELDS_CONFIG[key]?.some(c => c.guidF === b.name);
       if (isAPerson && !isBPerson) return -1;
       if (!isAPerson && isBPerson) return 1;
-      
       return 0;
   });
 
@@ -506,62 +505,51 @@ function openModalForm(oid = null) {
         return;
     }
     
-    // GESTIÓN GENÉRICA DE PERSONAS
     if (PERSON_FIELDS_CONFIG[key]) {
         const pConf = PERSON_FIELDS_CONFIG[key].find(c => c.textF === f.name || c.guidF === f.name);
         if (pConf) {
-            // Esconder el campo de texto libre
             if (f.name === pConf.textF) {
                 hiddenHtml += `<input type="hidden" data-field="${f.name}" data-type="${f.type}" id="hidden-${f.name}" value="${esc(val)}" />`;
                 return;
             }
-            // Renderizar el Selector GUID
             if (f.name === pConf.guidF) {
                 let currentFkVal = val;
                 let oldNameHint = "";
-                
-                // Auto-resolución de registros históricos por coincidencia exacta de nombre
                 if (editingRow && !currentFkVal) {
                      const oldName = editingRow.attributes[pConf.textF];
                      if (oldName) {
                          const matches = catalogs["SEG_Persona"]?.filter(p => p.Nombre && p.Nombre.trim().toLowerCase() === oldName.trim().toLowerCase());
-                         if (matches && matches.length === 1) {
-                             currentFkVal = matches[0].GlobalID; 
-                         } else {
-                             oldNameHint = `(Antiguo: ${esc(oldName)})`;
-                         }
+                         if (matches && matches.length === 1) currentFkVal = matches[0].GlobalID; 
+                         else oldNameHint = `(Antiguo: ${esc(oldName)})`;
                      }
                 }
-                
                 let opts = catalogs["SEG_Persona"].map(c => `<option value="${esc(c.GlobalID)}" ${currentFkVal===c.GlobalID?'selected':''}>${esc(buildEntityLabel("SEG_Persona", c))}</option>`).join("");
-                html += `<div class="field">
+                html += `<div class="field" id="field-wrap-${f.name}">
                             <label>${f.alias} <span style="color:#d64545">*</span></label>
                             <select data-field="${f.name}" data-type="${f.type}" id="sel-${f.name}">
                                 <option value="">- Seleccione ${f.alias.replace(' ID','')} - ${oldNameHint}</option>
                                 ${opts}
                             </select>
-                            ${oldNameHint ? `<span class="help-text" style="color:#d64545;">Debe reasignar una persona válida de la lista.</span>` : ''}
+                            ${oldNameHint ? `<span class="help-text" style="color:#d64545;">Debe reasignar una persona válida.</span>` : ''}
                          </div>`;
                 return;
             }
         }
     }
     
-    // Selects tradicionales (FK y Dominios)
     if(f.name.includes("GlobalID") || f.name.includes("Guid")) {
         if(isFK && catalogs[isFK]) {
             let opts = catalogs[isFK].map(c => `<option value="${esc(c.GlobalID || c[f.name])}" ${val===(c.GlobalID || c[f.name])?'selected':''}>${esc(buildEntityLabel(isFK, c))}</option>`).join("");
-            html += `<div class="field"><label>${f.alias}</label><select data-field="${f.name}" data-type="${f.type}" data-parent="1"><option value="">- Selecciona -</option>${opts}</select></div>`;
+            html += `<div class="field" id="field-wrap-${f.name}"><label>${f.alias}</label><select data-field="${f.name}" data-type="${f.type}" data-parent="1"><option value="">- Selecciona -</option>${opts}</select></div>`;
         }
         return; 
     }
     
     if(dom) {
       let opts = dom.map(d => `<option value="${esc(d.code)}" ${val===d.code?'selected':''}>${esc(d.name)}</option>`).join("");
-      html += `<div class="field"><label>${f.alias}</label><select data-field="${f.name}" data-type="${f.type}"><option value="">- Selecciona -</option>${opts}</select></div>`;
+      html += `<div class="field" id="field-wrap-${f.name}"><label>${f.alias}</label><select data-field="${f.name}" data-type="${f.type}"><option value="">- Selecciona -</option>${opts}</select></div>`;
     } 
     else {
-      // Inputs estándar
       const isWeight = PARENT_RULES[key]?.weight === f.name;
       const isDate = f.type === "esriFieldTypeDate";
       const type = isDate ? "date" : ((f.name.includes("Peso") || f.name.includes("Valor") || f.type==="esriFieldTypeDouble" || f.type==="esriFieldTypeInteger" || f.type==="esriFieldTypeSmallInteger") ? "number" : "text");
@@ -573,10 +561,10 @@ function openModalForm(oid = null) {
       }
 
       if (largeTextFields.includes(f.name)) {
-          html += `<div class="field"><label>${f.alias}</label><textarea data-field="${f.name}" data-type="${f.type}" rows="4" spellcheck="true" lang="es">${esc(val)}</textarea></div>`;
+          html += `<div class="field" id="field-wrap-${f.name}"><label>${f.alias}</label><textarea data-field="${f.name}" data-type="${f.type}" rows="4" spellcheck="true" lang="es">${esc(val)}</textarea></div>`;
       } else {
           const spellAttr = type === "text" ? 'spellcheck="true" lang="es"' : '';
-          html += `<div class="field"><label>${f.alias}</label>
+          html += `<div class="field" id="field-wrap-${f.name}"><label>${f.alias}</label>
             <input type="${type}" data-field="${f.name}" data-type="${f.type}" value="${esc(inputVal)}" ${isWeight?'step="0.01"':''} ${spellAttr} />
             ${isWeight ? `<span class="weight-helper" style="font-size:11px; font-weight:bold; margin-top:4px;"></span>` : ''}
           </div>`;
@@ -605,6 +593,23 @@ function openModalForm(oid = null) {
     formDyn.querySelectorAll(`input[data-field="${PARENT_RULES[key].weight}"]`).forEach(i => i.addEventListener("input", () => checkWeight(key)));
     checkWeight(key);
   }
+
+  // Lógica Dinámica: Topes Acumulados en PLAN_TareaVigencia
+  if (key === "PLAN_TareaVigencia") {
+      const elAplica = formDyn.querySelector('[data-field="AplicaTopeAcumulado"]');
+      const toggleTopes = () => {
+          const val = elAplica ? elAplica.value : "";
+          const show = (val === "SI" || val === "Si" || val === "si");
+          ["TopeAcumT1", "TopeAcumT2", "TopeAcumT3", "TopeAcumT4", "ObservacionReglaAvance"].forEach(f => {
+              const wrap = document.getElementById(`field-wrap-${f}`);
+              if (wrap) wrap.style.display = show ? "" : "none";
+          });
+      };
+      if (elAplica) {
+          elAplica.addEventListener("change", toggleTopes);
+          toggleTopes();
+      }
+  }
 }
 
 formDyn.addEventListener("input", (e) => {
@@ -618,9 +623,7 @@ async function checkWeight(key) {
   if(!helper || !pSel || !wInp) return;
   
   if(!pSel.value) { 
-      helper.textContent = "Selecciona el padre primero."; 
-      helper.style.color="var(--muted)"; 
-      return; 
+      helper.textContent = "Selecciona el padre primero."; helper.style.color="var(--muted)"; return; 
   }
   
   const v = document.getElementById("sel-vigencia").value;
@@ -638,7 +641,7 @@ async function checkWeight(key) {
   } catch(e) {}
 }
 
-/* ===== 7. GUARDADO CON VALIDACIONES Y AUDITORÍA ===== */
+/* ===== 7. GUARDADO CON VALIDACIONES (TOPES Y AUDITORÍA) ===== */
 async function save() {
   const key = currentEntityKey, attrs = {};
   const isUpdate = !!editingRow;
@@ -650,19 +653,12 @@ async function save() {
   if(metaCache[key].fieldsByName["PersonaUltimaEdicionID"]) attrs.PersonaUltimaEdicionID = SESSION.personaID;
 
   formDyn.querySelectorAll("[data-field]").forEach(el => { 
-    let v = el.value; 
-    const fType = el.getAttribute("data-type");
-
-    if (v === "") {
-        v = null;
-    } else if (el.type === "number" || fType === "esriFieldTypeDouble" || fType === "esriFieldTypeInteger" || fType === "esriFieldTypeSmallInteger") {
-        v = Number(v);
-    } else if (el.type === "date" || fType === "esriFieldTypeDate") {
-        if (v.includes("-")) {
-            v = new Date(v + "T12:00:00Z").getTime();
-        } else {
-            v = Number(v);
-        }
+    let v = el.value; const fType = el.getAttribute("data-type");
+    if (v === "") v = null;
+    else if (el.type === "number" || fType === "esriFieldTypeDouble" || fType === "esriFieldTypeInteger" || fType === "esriFieldTypeSmallInteger") v = Number(v);
+    else if (el.type === "date" || fType === "esriFieldTypeDate") {
+        if (v.includes("-")) v = new Date(v + "T12:00:00Z").getTime();
+        else v = Number(v);
     }
     attrs[el.getAttribute("data-field")] = v; 
   });
@@ -672,28 +668,60 @@ async function save() {
 
   if(key === "CFG_Actividad") attrs["Nombre"] = attrs["NombreActividad"];
 
-  // VALIDACIÓN FUERTE GENÉRICA PARA CAMPOS DE PERSONA
+  // Validación: Personas Genéricas
   if (PERSON_FIELDS_CONFIG[key]) {
       for (let pConf of PERSON_FIELDS_CONFIG[key]) {
           const selGid = attrs[pConf.guidF];
-          
           if (!selGid) {
               const inputEl = document.getElementById(`sel-${pConf.guidF}`);
               if(inputEl) { inputEl.classList.add("field-error"); inputEl.focus(); }
               throw new Error(`Debe seleccionar una opción válida para ${pConf.textF} de la lista.`);
           }
-          
           const personObj = catalogs["SEG_Persona"]?.find(p => p.GlobalID === selGid);
-          if (!personObj) throw new Error(`La persona seleccionada no pudo resolverse en el catálogo general.`);
-          
-          // La fuente de verdad del texto siempre es el catálogo
+          if (!personObj) throw new Error(`La persona seleccionada no pudo resolverse en el catálogo.`);
           attrs[pConf.textF] = personObj.Nombre;
+      }
+  }
 
-          if (isUpdate) {
-              console.log(`--- DEPURACIÓN UPDATE ${key} ---`);
-              console.log(`Campo Sincronizado: ${pConf.textF}`);
-              console.log("Persona Seleccionada (GUID):", selGid);
-              console.log("Persona Seleccionada (Nombre):", attrs[pConf.textF]);
+  // Validación: Topes Acumulados (PLAN_TareaVigencia)
+  if (key === "PLAN_TareaVigencia" && (attrs["AplicaTopeAcumulado"] === "SI" || attrs["AplicaTopeAcumulado"] === "Si")) {
+      const t1 = Number(attrs["TopeAcumT1"]) || 0;
+      const t2 = Number(attrs["TopeAcumT2"]) || 0;
+      const t3 = Number(attrs["TopeAcumT3"]) || 0;
+      const t4 = Number(attrs["TopeAcumT4"]) || 0;
+      if (!(t1 >= 0 && t1 <= t2 && t2 <= t3 && t3 <= t4 && t4 <= 100)) {
+          throw new Error("Los topes acumulados deben ser numéricos, crecientes y no superar 100%. Revise los valores de Máximo T1, T2, T3 y T4.");
+      }
+  }
+
+  // Validación: Reporte Acumulado (REP_AvanceTarea) contra Topes de Planeación
+  if (key === "REP_AvanceTarea") {
+      const tareaId = attrs["TareaGlobalID"];
+      const vig = attrs["Vigencia"] || document.getElementById("sel-vigencia").value;
+      const perStr = attrs["Periodo"]; 
+      const valor = Number(attrs["ValorReportado"]);
+
+      if (tareaId && vig && perStr && !isNaN(valor)) {
+          let mappedPer = "";
+          if (perStr.includes("1") || perStr === "T1") mappedPer = "T1";
+          else if (perStr.includes("2") || perStr === "T2") mappedPer = "T2";
+          else if (perStr.includes("3") || perStr === "T3") mappedPer = "T3";
+          else if (perStr.includes("4") || perStr === "T4") mappedPer = "T4";
+
+          if (mappedPer) {
+              const planRes = await fetchJson(`${entityUrl("PLAN_TareaVigencia")}/query`, {
+                  f: "json", where: `TareaGlobalID='${tareaId}' AND Vigencia=${vig}`,
+                  outFields: "AplicaTopeAcumulado,TopeAcumT1,TopeAcumT2,TopeAcumT3,TopeAcumT4", returnGeometry: false
+              });
+              if (planRes.features && planRes.features.length > 0) {
+                  const pAttrs = planRes.features[0].attributes;
+                  if (pAttrs.AplicaTopeAcumulado === "SI" || pAttrs.AplicaTopeAcumulado === "Si") {
+                      const maxVal = Number(pAttrs[`TopeAcum${mappedPer}`]);
+                      if (!isNaN(maxVal) && valor > maxVal) {
+                          throw new Error(`Esta tarea tiene tope acumulado para ${mappedPer}. El máximo permitido es ${maxVal}%.`);
+                      }
+                  }
+              }
           }
       }
   }
@@ -724,15 +752,11 @@ async function save() {
   try {
       const res = await postForm(url, p);
       if (res.error) throw new Error(res.error.message || "Error genérico en el servidor.");
-      
       if (res.addResults && res.addResults.length > 0 && !res.addResults[0].success) {
-          const errDesc = res.addResults[0].error?.description || res.addResults[0].error?.message || "Error desconocido";
-          throw new Error(`Error al crear: ${errDesc}`);
+          throw new Error(`Error al crear: ${res.addResults[0].error?.description || "Error desconocido"}`);
       }
-      
       if (res.updateResults && res.updateResults.length > 0 && !res.updateResults[0].success) {
-          const errDesc = res.updateResults[0].error?.description || res.updateResults[0].error?.message || "Error desconocido";
-          throw new Error(`Error al actualizar: ${errDesc}`);
+          throw new Error(`Error al actualizar: ${res.updateResults[0].error?.description || "Error desconocido"}`);
       }
       
       const resultingObjectId = isUpdate ? attrs.OBJECTID : res.addResults[0].objectId;
@@ -800,7 +824,7 @@ document.getElementById("btn-delete").addEventListener("click", async () => {
   } finally { btn.disabled = false; btn.textContent = "Eliminar"; }
 });
 
-/* ===== EVENTOS COMPLEMENTARIOS ===== */
+/* ===== 9. EVENTOS Y CLONACIÓN ===== */
 document.getElementById("btn-close").addEventListener("click", () => document.getElementById("modal").classList.remove("is-open"));
 document.getElementById("btn-reload").addEventListener("click", () => loadEntity(currentEntityKey, false));
 document.getElementById("btn-new").addEventListener("click", () => openModalForm(null));
@@ -810,3 +834,112 @@ let tOut;
 document.getElementById("txt-search").addEventListener("input", () => { 
     clearTimeout(tOut); tOut = setTimeout(() => { if(currentEntityKey) loadEntity(currentEntityKey, false); }, 350); 
 });
+
+/* Lógica del Modal de Clonación Segura */
+document.getElementById("btn-open-clone").addEventListener("click", () => {
+    if(!SESSION.isSuperAdmin) return;
+    document.getElementById("modal-clone").classList.add("is-open");
+});
+
+document.getElementById("btn-close-clone").addEventListener("click", () => {
+    document.getElementById("modal-clone").classList.remove("is-open");
+});
+
+document.getElementById("btn-exec-clone").addEventListener("click", async () => {
+    if(!SESSION.isSuperAdmin) return;
+    
+    const origen = document.getElementById("sel-clone-origen").value;
+    const destino = document.getElementById("sel-clone-destino").value;
+    
+    if(!origen || !destino) return alert("Debe seleccionar vigencia origen y destino.");
+    if(origen === destino) return alert("El origen y el destino no pueden ser iguales.");
+    
+    const conf1 = confirm(`¿Está seguro de que desea clonar la vigencia ${origen} hacia la vigencia ${destino}? Esta acción creará registros nuevos en las tablas anuales de planeación.`);
+    if(!conf1) return;
+    
+    const conf2 = confirm(`Confirme nuevamente: se clonarán masivamente registros desde ${origen} hacia ${destino}. No debe ejecutar este proceso dos veces para la misma combinación.`);
+    if(!conf2) return;
+    
+    const btn = document.getElementById("btn-exec-clone");
+    btn.disabled = true;
+    btn.textContent = "Clonando... ⏳";
+    setStatus(`Iniciando clonación de ${origen} a ${destino}...`, "info");
+    
+    try {
+        const resSub = await processClone("PLAN_SubActividadVigencia", origen, destino, "SubActividadGlobalID");
+        const resTar = await processClone("PLAN_TareaVigencia", origen, destino, "TareaGlobalID");
+        
+        const msg = `Clonación finalizada:\n\n- PLAN_SubActividadVigencia: ${resSub.created} creados, ${resSub.skipped} omitidos, ${resSub.errors} errores\n- PLAN_TareaVigencia: ${resTar.created} creados, ${resTar.skipped} omitidos, ${resTar.errors} errores`;
+        
+        alert(msg);
+        setStatus("Clonación completada.", "success");
+        
+        await writeAuditEvent("CLONE_VIGENCIA", "PLAN_SubActividadVigencia / PLAN_TareaVigencia", "", "OK", `Clonación de ${origen} hacia ${destino}. SubActividades: ${resSub.created}. Tareas: ${resTar.created}.`);
+        
+        document.getElementById("modal-clone").classList.remove("is-open");
+        if(currentEntityKey) await loadEntity(currentEntityKey, false);
+    } catch(e) {
+        setStatus(`Error crítico en clonación: ${e.message}`, "error");
+        await writeAuditEvent("CLONE_VIGENCIA", "Varias", "", "ERROR", e.message);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = "Ejecutar";
+    }
+});
+
+async function processClone(entityKey, origen, destino, fkField) {
+    const result = { created: 0, skipped: 0, errors: 0 };
+    
+    // outFields="*" asegura que se copian TODOS los campos, incluyendo los nuevos de topes.
+    const sourceRes = await fetchJson(`${entityUrl(entityKey)}/query`, { f:"json", where:`Vigencia=${origen}`, outFields:"*", returnGeometry:false });
+    const sourceRows = sourceRes.features || [];
+    if(sourceRows.length === 0) return result;
+    
+    const targetRes = await fetchJson(`${entityUrl(entityKey)}/query`, { f:"json", where:`Vigencia=${destino}`, outFields:fkField, returnGeometry:false });
+    const targetRows = targetRes.features || [];
+    const existingFks = new Set(targetRows.map(r => r.attributes[fkField]));
+    
+    const adds = [];
+    for(let row of sourceRows) {
+        const attrs = row.attributes;
+        const fkVal = attrs[fkField];
+        
+        if(existingFks.has(fkVal)) {
+            result.skipped++;
+            continue;
+        }
+        
+        const newAttrs = { ...attrs };
+        delete newAttrs.OBJECTID;
+        newAttrs.GlobalID = generateGUID();
+        newAttrs.Vigencia = Number(destino);
+        
+        delete newAttrs.CreationDate;
+        delete newAttrs.Creator;
+        delete newAttrs.EditDate;
+        delete newAttrs.Editor;
+        if(newAttrs.PersonaUltimaEdicionID !== undefined) newAttrs.PersonaUltimaEdicionID = SESSION.personaID;
+        
+        adds.push({ attributes: newAttrs });
+    }
+    
+    if(adds.length === 0) return result;
+    
+    const chunkSize = 100;
+    for(let i=0; i<adds.length; i+=chunkSize) {
+        const chunk = adds.slice(i, i+chunkSize);
+        try {
+            const postRes = await postForm(`${entityUrl(entityKey)}/applyEdits`, { adds: chunk });
+            if(postRes.addResults) {
+                postRes.addResults.forEach(r => {
+                    if(r.success) result.created++;
+                    else result.errors++;
+                });
+            }
+        } catch(e) {
+            console.error(`Error clonando chunk de ${entityKey}:`, e);
+            result.errors += chunk.length;
+        }
+    }
+    return result;
+}
