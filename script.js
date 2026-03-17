@@ -36,14 +36,13 @@ const SESSION = {
   maxPerm: "Ver", // Permiso máximo global heredado
   allowedGuids: {}, // { "CFG_Proyecto": Set(guid1, guid2) }
   assignedTasks: new Set(),
-  tablePermissions: {} // Permisos específicos inyectados por código (ej. Publicador)
+  tablePermissions: {} // Permisos específicos inyectados por código
 };
 
 let currentEntityKey = null;
 let currentRows = [];
 let editingRow = null;
 let metaCache = {};
-let catalogs = {};
 
 /* ===== Utils ===== */
 const uiOTP = document.getElementById("otp-overlay");
@@ -51,7 +50,6 @@ const uiApp = document.getElementById("app-main");
 const elStatus = document.getElementById("status");
 const elOtpStatus = document.getElementById("otp-status");
 const modal = document.getElementById("modal");
-const formDyn = document.getElementById("form-dynamic");
 
 function setStatus(msg, type="info", isOtp=false){
   const el = isOtp ? elOtpStatus : elStatus;
@@ -92,7 +90,7 @@ document.getElementById("btn-request-otp").addEventListener("click", async () =>
   setStatus("Verificando en base de datos...", "info", true);
   
   try {
-    // 1. Validación previa en el Frontend (Asegura que exista en V3)
+    // 1. Validación previa en el Frontend
     const res = await fetchJson(entityUrl("SEG_Persona")+"/query", { 
       f:"json", 
       where:`Cedula='${ced}' AND Correo='${cor}' AND Activo='SI'`, 
@@ -134,27 +132,63 @@ document.getElementById("btn-request-otp").addEventListener("click", async () =>
 });
 
 document.getElementById("btn-verify-otp").addEventListener("click", async () => {
-  const code = document.getElementById("inp-codigo").value.trim().toUpperCase();
+  // Ajuste para coincidir exactamente con el valor guardado en Power Automate (CodigoHash)
+  const code = document.getElementById("inp-codigo").value.trim();
   if(!code) return;
+  
   setStatus("Validando código...", "info", true);
   try {
-    const res = await fetchJson(entityUrl("SEG_OTP")+"/query", { f:"json", where:`PersonaGlobalID='${SESSION.personaGlobalID}' AND Usado='NO'`, outFields:"OBJECTID,CodigoUlt4,FechaExpira", orderByFields:"FechaEnvio DESC", resultRecordCount:1, returnGeometry:false });
+    const res = await fetchJson(entityUrl("SEG_OTP")+"/query", { 
+        f:"json", 
+        where:`PersonaGlobalID='${SESSION.personaGlobalID}' AND Usado='NO'`, 
+        outFields:"OBJECTID,CodigoHash,FechaExpira", 
+        orderByFields:"FechaEnvio DESC", 
+        resultRecordCount:1, 
+        returnGeometry:false 
+    });
+    
     if(!res.features || res.features.length === 0) throw new Error("No hay código pendiente.");
+    
     const otp = res.features[0].attributes;
-    if(otp.CodigoUlt4 !== code) throw new Error("Código incorrecto.");
-    if(new Date(otp.FechaExpira) < new Date()) throw new Error("El código expiró.");
+    
+    if(otp.CodigoHash !== code) throw new Error("Código incorrecto.");
+    if(otp.FechaExpira && new Date(otp.FechaExpira) < new Date()) throw new Error("El código expiró.");
 
     // Quemar OTP
     await postForm(entityUrl("SEG_OTP")+"/applyEdits", { f:"json", updates:[{attributes:{OBJECTID:otp.OBJECTID, Usado:'SI'}}] });
     
     await initSession();
-  } catch(e) { setStatus(e.message, "error", true); }
+  } catch(e) { 
+      setStatus(e.message, "error", true); 
+  }
 });
 
-document.getElementById("btn-back-otp").addEventListener("click", () => {
-  document.getElementById("otp-step-2").classList.add("is-hidden");
-  document.getElementById("otp-step-1").classList.remove("is-hidden");
-  setStatus("", "info", true);
+document.getElementById("btn-verify-otp").addEventListener("click", async () => {
+  const code = document.getElementById("inp-codigo").value.trim();
+  if(!code) return;
+  
+  setStatus("Validando código...", "info", true);
+  try {
+    // Consulta idéntica a la App de Reportes: Validamos el CodigoHash directamente en el WHERE
+    const res = await fetchJson(entityUrl("SEG_OTP")+"/query", { 
+        f:"json", 
+        where:`PersonaGlobalID='${SESSION.personaGlobalID}' AND CodigoHash='${code}' AND Usado='NO'`, 
+        outFields:"OBJECTID", 
+        returnGeometry:false 
+    });
+    
+    // Si no devuelve resultados, el código es incorrecto o ya se usó
+    if(!res.features || res.features.length === 0) throw new Error("Código incorrecto.");
+    
+    const otp = res.features[0].attributes;
+
+    // Quemar OTP
+    await postForm(entityUrl("SEG_OTP")+"/applyEdits", { f:"json", updates:[{attributes:{OBJECTID:otp.OBJECTID, Usado:'SI'}}] });
+    
+    await initSession();
+  } catch(e) { 
+      setStatus(e.message, "error", true); 
+  }
 });
 
 /* ===========================================================
@@ -173,13 +207,12 @@ async function initSession() {
     const resA = await fetchJson(entityUrl("SEG_Alcance")+"/query", { f:"json", where:`PersonaID='${SESSION.personaID}' AND Activo='SI'`, outFields:"NivelJerarquia,ObjetoGlobalID,Permiso", returnGeometry:false });
     const alcances = (resA.features||[]).map(f => f.attributes);
     
-    // Obtener permiso máximo (Lógica: Administrar > Editar > Aprobar > Revisar > Ver)
     const permWeight = {"Ver":1, "Revisar":2, "Aprobar":3, "Editar":4, "Administrar":5};
     let maxW = 0;
     alcances.forEach(a => { if(permWeight[a.Permiso] > maxW) { maxW = permWeight[a.Permiso]; SESSION.maxPerm = a.Permiso; }});
     if(SESSION.isSuperAdmin) SESSION.maxPerm = "Administrar";
 
-    // Asignaciones Operativas (Reportes)
+    // Asignaciones
     const resAsig = await fetchJson(entityUrl("SEG_Asignacion")+"/query", { f:"json", where:`PersonaGlobalID='${SESSION.personaGlobalID}' AND Activo='SI'`, outFields:"TareaGlobalID", returnGeometry:false });
     (resAsig.features||[]).forEach(f => SESSION.assignedTasks.add(f.attributes.TareaGlobalID));
 
@@ -244,7 +277,6 @@ function buildDynamicMenu() {
   } else {
     if(SESSION.roles.includes("PUBLICADOR")) {
       ["WF_SolicitudRevision", "WF_AprobacionPaso", "CFG_PAC", "CFG_Linea", "BI_AvanceActividad", "BI_AvanceObjetivo", "BI_AvanceProyecto", "BI_AvancePrograma", "BI_AvanceLinea", "BI_AvancePAC"].forEach(t => visibleTables.add(t));
-      // Contexto Read-Only
       ["CFG_Programa", "CFG_Proyecto", "CFG_Objetivo", "CFG_Actividad", "REP_AvanceTarea", "REP_ReporteNarrativo"].forEach(t => { visibleTables.add(t); SESSION.tablePermissions[t] = "Ver"; });
     }
     if(SESSION.roles.includes("APROBADOR")) {
@@ -293,17 +325,15 @@ function buildWhere(key) {
 
   if(SESSION.isSuperAdmin) return w;
 
-  // Filtrado Jerárquico CFG y PLAN
   if(SESSION.allowedGuids[key]) {
     const guids = Array.from(SESSION.allowedGuids[key]);
     if(guids.length === 0) return "1=0";
     w += ` AND GlobalID IN (${guids.map(g => `'${g}'`).join(",")})`;
   }
   
-  // Filtrado estricto por Asignación para Reportes
   if(["REP_AvanceTarea", "PLAN_TareaVigencia"].includes(key)) {
     const tGuids = Array.from(SESSION.assignedTasks);
-    if(tGuids.length === 0 && SESSION.maxPerm === "Ver") return "1=0"; // Editor sin tareas
+    if(tGuids.length === 0 && SESSION.maxPerm === "Ver") return "1=0"; 
     if(tGuids.length > 0) w += ` AND TareaGlobalID IN (${tGuids.map(g => `'${g}'`).join(",")})`;
   }
 
@@ -335,7 +365,7 @@ async function loadEntity(key) {
   });
 
   currentRows = r.features || [];
-  renderTable(key, currentRows, metaCache[key].slice(0, 8), canWrite); // Pintamos max 8 cols
+  renderTable(key, currentRows, metaCache[key].slice(0, 8), canWrite);
   setStatus(`Cargados ${currentRows.length} registros.`, "success");
 }
 
@@ -361,17 +391,15 @@ function renderTable(key, rows, fields, canWrite) {
 function openForm(oid) {
   editingRow = currentRows.find(x => x.attributes.OBJECTID === oid);
   document.getElementById("modal").classList.add("is-open");
-  // La inyección dinámica de inputs iría aquí (se omite detalle UI para foco en lógica V3)
   document.getElementById("form-dynamic").innerHTML = `<p>Editando OID: ${oid}</p><p class="muted">El ID de usuario <b>${SESSION.personaID}</b> se inyectará al guardar.</p>`;
 }
 
 document.getElementById("btn-close").addEventListener("click", () => document.getElementById("modal").classList.remove("is-open"));
 
 document.getElementById("btn-save").addEventListener("click", async () => {
-  // REGLA OBLIGATORIA: Inyectar identidad funcional en el payload
   const attrs = {
     OBJECTID: editingRow ? editingRow.attributes.OBJECTID : undefined,
-    PersonaUltimaEdicionID: SESSION.personaID // Trazabilidad V3
+    PersonaUltimaEdicionID: SESSION.personaID 
   };
   
   alert(`Simulando POST a AGOL con:\n\nPayload: ${JSON.stringify(attrs)}`);
