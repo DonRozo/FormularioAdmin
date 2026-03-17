@@ -1,7 +1,7 @@
 /* ===========================================================
    DATA-PAC | Admin OAP V3 (script.js)
    - OTP Auth, RBAC, Sorting, Formularios Reales, Auditoría
-   - MEJORAS: Buscador Dinámico, Corrección estricta de Labels (safeLabel)
+   - MEJORAS: Buscador Dinámico, Corrección Labels, Integración ResponsableGlobalID
    =========================================================== */
 
 const SERVICE_URL = "https://services6.arcgis.com/yq6pe3Lw2oWFjWtF/arcgis/rest/services/DATAPAC_V3/FeatureServer";
@@ -28,11 +28,12 @@ const PARENT_RULES = {
   PLAN_TareaVigencia: { fk: "TareaGlobalID", parent: "CFG_Tarea", weight: "PesoTarea" }
 };
 
+// Se agregó ResponsableGlobalID al mapeo de FKs
 const FK_MAPPING = {
   PACGlobalID: "CFG_PAC", LineaGlobalID: "CFG_Linea", ProgramaGlobalID: "CFG_Programa",
   ProyectoGlobalID: "CFG_Proyecto", ObjetivoGlobalID: "CFG_Objetivo", ActividadGlobalID: "CFG_Actividad",
   SubActividadGlobalID: "CFG_SubActividad", TareaGlobalID: "CFG_Tarea", PersonaGlobalID: "SEG_Persona",
-  RolID: "SEG_Rol"
+  RolID: "SEG_Rol", ResponsableGlobalID: "SEG_Persona"
 };
 
 const CHILDREN_RULES = [
@@ -48,6 +49,7 @@ const UNIQUE_FIELDS = {
   CFG_Objetivo: "ObjetivoID", CFG_Actividad: "ActividadID", CFG_SubActividad: "CodigoSubActividad", CFG_Tarea: "CodigoTarea"
 };
 
+// Se agregó Responsable a la búsqueda de AvanceTarea
 const SEARCH_FIELDS = {
   CFG_PAC: ["PACID", "Nombre"], CFG_Linea: ["LineaID", "Nombre"], CFG_Programa: ["ProgramaID", "Nombre"],
   CFG_Proyecto: ["ProyectoID", "Nombre"], CFG_Objetivo: ["ObjetivoID", "Nombre"],
@@ -58,6 +60,7 @@ const SEARCH_FIELDS = {
   PLAN_TareaVigencia: ["UnidadMedida"],
   SEG_Persona: ["PersonaID", "Nombre", "Cedula", "Correo"],
   SEG_Rol: ["RolID", "NombreRol"], SEG_Asignacion: ["Estado"],
+  REP_AvanceTarea: ["Responsable", "Observaciones", "Periodo", "MotivoAjuste"],
   AUD_HistorialCambio: ["TipoObjeto", "ObjetoGlobalID", "CampoModificado", "ValorAnterior", "ValorNuevo", "MotivoCambio", "OrigenCambio"],
   AUD_EventoSistema: ["TipoEvento", "Entidad", "Resultado", "DetalleEvento"],
   WF_SolicitudRevision: ["EstadoActual", "ComentarioSolicitante"]
@@ -211,7 +214,6 @@ async function resolveHierarchy(alcances) {
   propagate("CFG_SubActividad", "CFG_Tarea", "SubActividadGlobalID");
 }
 
-/* ===== CORRECCIÓN V3: GENERADOR ROBUSTO DE ETIQUETAS ===== */
 function safeLabel(code, name) {
     const c = code ? String(code).trim() : "";
     const n = name ? String(name).trim() : "";
@@ -232,7 +234,11 @@ function buildEntityLabel(entityKey, item) {
         case "CFG_Actividad": return safeLabel(item.ActividadID, item.NombreActividad || item.Nombre);
         case "CFG_SubActividad": return safeLabel(item.CodigoSubActividad, item.NombreSubActividad);
         case "CFG_Tarea": return safeLabel(item.CodigoTarea, item.NombreTarea);
-        case "SEG_Persona": return safeLabel(item.Cedula, item.Nombre);
+        case "SEG_Persona": 
+            if (item.Nombre && item.Cedula) return `${item.Nombre} — ${item.Cedula}`;
+            if (item.Nombre && item.Correo) return `${item.Nombre} — ${item.Correo}`;
+            if (item.PersonaID && item.Nombre) return `${item.PersonaID} — ${item.Nombre}`;
+            return item.Nombre || item.GlobalID || "(sin etiqueta)";
         case "SEG_Rol": return safeLabel(item.RolID, item.NombreRol);
         default: return item.GlobalID || "(sin etiqueta)";
     }
@@ -255,11 +261,11 @@ async function loadCatalogs() {
   await fetchCat("CFG_Programa", "Nombre", ",ProgramaID"); 
   await fetchCat("CFG_Proyecto", "Nombre", ",ProyectoID");
   await fetchCat("CFG_Objetivo", "Nombre", ",ObjetivoID"); 
-  // Fallback seguro: Trae NombreActividad y Nombre por compatibilidad
   await fetchCat("CFG_Actividad", "NombreActividad", ",ActividadID,Nombre");
   await fetchCat("CFG_SubActividad", "NombreSubActividad", ",CodigoSubActividad"); 
   await fetchCat("CFG_Tarea", "NombreTarea", ",CodigoTarea");
-  await fetchCat("SEG_Persona", "Nombre", ",Cedula"); 
+  // Extraemos Correo y Cedula para labels completos en SEG_Persona
+  await fetchCat("SEG_Persona", "Nombre", ",Cedula,Correo,PersonaID"); 
   await fetchCat("SEG_Rol", "NombreRol", ",RolID");
 }
 
@@ -379,7 +385,7 @@ window.toggleSort = function(col) {
 
 function renderTable() {
   const key = currentEntityKey, canWrite = hasWritePermission(key), canDel = canDelete();
-  const techFields = ["CreationDate", "Creator", "EditDate", "Editor", "PersonaUltimaEdicionID", "FechaUltimaEdicionFuncional", "PersonaID"];
+  const techFields = ["CreationDate", "Creator", "EditDate", "Editor", "PersonaUltimaEdicionID", "FechaUltimaEdicionFuncional", "PersonaID", "ResponsableGlobalID"];
   
   let fields = metaCache[key].fields.filter(f => 
     f.name === "OBJECTID" || (!f.name.includes("GlobalID") && !f.name.includes("Guid") && !techFields.includes(f.name) && f.name !== "IndicadorID" && !(key === "CFG_Actividad" && f.name === "Nombre"))
@@ -448,7 +454,9 @@ window.confirmDelete = async function(oid) {
 
     await loadCatalogs(); await loadEntity(key, false); setStatus("Registro eliminado exitosamente.", "success");
   } catch(e) {
-    if (!e.message.includes("Dependencias encontradas")) await writeAuditEvent("DELETE", key, parentGid, "ERROR", e.message);
+    if (!e.message.includes("Dependencias encontradas")) {
+        await writeAuditEvent("DELETE", key, parentGid, "ERROR", e.message);
+    }
     setStatus(e.message, "error");
   }
 };
@@ -479,6 +487,12 @@ function openModalForm(oid = null) {
           if (a.name === "TareaGlobalID") return -1;
           if (b.name === "TareaGlobalID") return 1;
       }
+      if (key === "REP_AvanceTarea") {
+          if (a.name === "TareaGlobalID") return -1;
+          if (b.name === "TareaGlobalID") return 1;
+          if (a.name === "ResponsableGlobalID") return -1;
+          if (b.name === "ResponsableGlobalID") return 1;
+      }
       return 0;
   });
 
@@ -489,14 +503,44 @@ function openModalForm(oid = null) {
     const dom = metaCache[key].domainsByField[f.name];
     const isFK = FK_MAPPING[f.name];
     
-    if(f.name === parentTextF || (key === "CFG_Actividad" && f.name === "Nombre")) {
+    // Ocultar campo texto del padre, Nombre legado de Actividad, y Responsable texto en REP_AvanceTarea
+    if(f.name === parentTextF || (key === "CFG_Actividad" && f.name === "Nombre") || (key === "REP_AvanceTarea" && f.name === "Responsable")) {
         hiddenHtml += `<input type="hidden" data-field="${f.name}" id="hidden-${f.name}" value="${esc(val)}" />`; 
+        return;
+    }
+    
+    // CASO ESPECIAL: ResponsableGlobalID en REP_AvanceTarea
+    if(key === "REP_AvanceTarea" && f.name === "ResponsableGlobalID") {
+        let currentFkVal = val;
+        let oldNameHint = "";
+        
+        // Auto-resolución para registros históricos que sólo tenían texto
+        if (editingRow && !currentFkVal) {
+             const oldName = editingRow.attributes["Responsable"];
+             if (oldName) {
+                 const matches = catalogs["SEG_Persona"]?.filter(p => p.Nombre && p.Nombre.trim().toLowerCase() === oldName.trim().toLowerCase());
+                 if (matches && matches.length === 1) {
+                     currentFkVal = matches[0].GlobalID; // Auto-enlaza si la coincidencia es exacta
+                 } else {
+                     oldNameHint = `(Antiguo: ${esc(oldName)})`;
+                 }
+             }
+        }
+        
+        let opts = catalogs["SEG_Persona"].map(c => `<option value="${esc(c.GlobalID)}" ${currentFkVal===c.GlobalID?'selected':''}>${esc(buildEntityLabel("SEG_Persona", c))}</option>`).join("");
+        html += `<div class="field">
+                    <label>${f.alias} <span style="color:#d64545">*</span></label>
+                    <select data-field="${f.name}" id="sel-responsable">
+                        <option value="">- Seleccione Responsable - ${oldNameHint}</option>
+                        ${opts}
+                    </select>
+                    ${oldNameHint ? `<span class="help-text" style="color:#d64545;">Debe reasignar el responsable válido de la lista.</span>` : ''}
+                 </div>`;
         return;
     }
     
     if(f.name.includes("GlobalID") || f.name.includes("Guid")) {
         if(isFK && catalogs[isFK]) {
-            // CORRECCIÓN: Renderizado estricto del Label usando la función buildEntityLabel
             let opts = catalogs[isFK].map(c => `<option value="${esc(c.GlobalID || c[f.name])}" ${val===(c.GlobalID || c[f.name])?'selected':''}>${esc(buildEntityLabel(isFK, c))}</option>`).join("");
             html += `<div class="field"><label>${f.alias}</label><select data-field="${f.name}" data-parent="1"><option value="">- Selecciona -</option>${opts}</select></div>`;
         }
@@ -543,6 +587,18 @@ function openModalForm(oid = null) {
     formDyn.querySelectorAll(`input[data-field="${PARENT_RULES[key].weight}"]`).forEach(i => i.addEventListener("input", () => checkWeight(key)));
     checkWeight(key);
   }
+
+  // Evento especial para inyectar Responsable texto desde el Combo GUID
+  const selResp = document.getElementById("sel-responsable");
+  if (selResp) {
+      selResp.addEventListener("change", (e) => {
+          const hidResp = document.getElementById("hidden-Responsable");
+          if (hidResp) {
+              const match = catalogs["SEG_Persona"]?.find(x => x.GlobalID === e.target.value);
+              hidResp.value = match ? match.Nombre : "";
+          }
+      });
+  }
 }
 
 formDyn.addEventListener("input", (e) => {
@@ -576,7 +632,7 @@ async function checkWeight(key) {
   } catch(e) {}
 }
 
-/* ===== 7. GUARDADO CON VALIDACIÓN DE DUPLICADOS Y AUDITORÍA ===== */
+/* ===== 7. GUARDADO CON VALIDACIONES Y AUDITORÍA ===== */
 async function save() {
   const key = currentEntityKey, attrs = {};
   const isUpdate = !!editingRow;
@@ -596,6 +652,13 @@ async function save() {
   if(formDyn.querySelector("[data-invalid='1']")) throw new Error("El peso total excede el 100%.");
 
   if(key === "CFG_Actividad") attrs["Nombre"] = attrs["NombreActividad"];
+
+  // Validación Fuerte REP_AvanceTarea: Exigir Responsable
+  if (key === "REP_AvanceTarea" && !attrs["ResponsableGlobalID"]) {
+      const inputEl = document.getElementById("sel-responsable");
+      if(inputEl) { inputEl.classList.add("field-error"); inputEl.focus(); }
+      throw new Error("Debe seleccionar un responsable válido de la lista.");
+  }
 
   const uniqueField = UNIQUE_FIELDS[key];
   if (uniqueField && attrs[uniqueField]) {
