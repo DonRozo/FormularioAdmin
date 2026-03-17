@@ -1,7 +1,7 @@
 /* ===========================================================
    DATA-PAC | Admin OAP V3 (script.js)
    - OTP Auth, RBAC, Sorting, Formularios Reales, Auditoría
-   - MEJORAS: Buscador Dinámico, Corrección Labels, Integración ResponsableGlobalID (UPDATE ROBUSTO)
+   - MEJORAS: Corrección estricta de tipos de datos (Fechas/Números) para Updates en AGOL
    =========================================================== */
 
 const SERVICE_URL = "https://services6.arcgis.com/yq6pe3Lw2oWFjWtF/arcgis/rest/services/DATAPAC_V3/FeatureServer";
@@ -460,7 +460,7 @@ window.confirmDelete = async function(oid) {
   }
 };
 
-/* ===== 6. FORMULARIOS REALES ORDENADOS ===== */
+/* ===== 6. FORMULARIOS CON TIPADO ESTRICTO DE FECHA ===== */
 function openModalForm(oid = null) {
   const key = currentEntityKey; 
   editingRow = oid ? currentRows.find(x => x.attributes.OBJECTID === oid) : null;
@@ -504,11 +504,12 @@ function openModalForm(oid = null) {
     
     // Ocultar campos de texto dependientes de UI
     if(f.name === parentTextF || (key === "CFG_Actividad" && f.name === "Nombre") || (key === "REP_AvanceTarea" && f.name === "Responsable")) {
-        hiddenHtml += `<input type="hidden" data-field="${f.name}" id="hidden-${f.name}" value="${esc(val)}" />`; 
+        // Se añade data-type para que el tipado fuerte también actúe en los ocultos si fuera necesario
+        hiddenHtml += `<input type="hidden" data-field="${f.name}" data-type="${f.type}" id="hidden-${f.name}" value="${esc(val)}" />`; 
         return;
     }
     
-    // CASO ESPECIAL: ResponsableGlobalID en REP_AvanceTarea (Resuelve históricos)
+    // CASO ESPECIAL: ResponsableGlobalID en REP_AvanceTarea
     if(key === "REP_AvanceTarea" && f.name === "ResponsableGlobalID") {
         let currentFkVal = val;
         let oldNameHint = "";
@@ -528,7 +529,7 @@ function openModalForm(oid = null) {
         let opts = catalogs["SEG_Persona"].map(c => `<option value="${esc(c.GlobalID)}" ${currentFkVal===c.GlobalID?'selected':''}>${esc(buildEntityLabel("SEG_Persona", c))}</option>`).join("");
         html += `<div class="field">
                     <label>${f.alias} <span style="color:#d64545">*</span></label>
-                    <select data-field="${f.name}" id="sel-responsable">
+                    <select data-field="${f.name}" data-type="${f.type}" id="sel-responsable">
                         <option value="">- Seleccione Responsable - ${oldNameHint}</option>
                         ${opts}
                     </select>
@@ -540,24 +541,33 @@ function openModalForm(oid = null) {
     if(f.name.includes("GlobalID") || f.name.includes("Guid")) {
         if(isFK && catalogs[isFK]) {
             let opts = catalogs[isFK].map(c => `<option value="${esc(c.GlobalID || c[f.name])}" ${val===(c.GlobalID || c[f.name])?'selected':''}>${esc(buildEntityLabel(isFK, c))}</option>`).join("");
-            html += `<div class="field"><label>${f.alias}</label><select data-field="${f.name}" data-parent="1"><option value="">- Selecciona -</option>${opts}</select></div>`;
+            html += `<div class="field"><label>${f.alias}</label><select data-field="${f.name}" data-type="${f.type}" data-parent="1"><option value="">- Selecciona -</option>${opts}</select></div>`;
         }
         return; 
     }
     
     if(dom) {
       let opts = dom.map(d => `<option value="${esc(d.code)}" ${val===d.code?'selected':''}>${esc(d.name)}</option>`).join("");
-      html += `<div class="field"><label>${f.alias}</label><select data-field="${f.name}"><option value="">- Selecciona -</option>${opts}</select></div>`;
+      html += `<div class="field"><label>${f.alias}</label><select data-field="${f.name}" data-type="${f.type}"><option value="">- Selecciona -</option>${opts}</select></div>`;
     } 
     else {
       const isWeight = PARENT_RULES[key]?.weight === f.name;
-      const type = (f.name.includes("Peso") || f.name.includes("Valor") || f.type==="esriFieldTypeDouble") ? "number" : "text";
+      const isDate = f.type === "esriFieldTypeDate";
+      const type = isDate ? "date" : ((f.name.includes("Peso") || f.name.includes("Valor") || f.type==="esriFieldTypeDouble" || f.type==="esriFieldTypeInteger" || f.type==="esriFieldTypeSmallInteger") ? "number" : "text");
+
+      let inputVal = val;
+      if (isDate && val) {
+          // Convertir Epoch a YYYY-MM-DD ajustando por zona horaria local
+          const d = new Date(val);
+          inputVal = new Date(d.getTime() - (d.getTimezoneOffset() * 60000)).toISOString().split('T')[0];
+      }
+
       if (largeTextFields.includes(f.name)) {
-          html += `<div class="field"><label>${f.alias}</label><textarea data-field="${f.name}" rows="4" spellcheck="true" lang="es">${esc(val)}</textarea></div>`;
+          html += `<div class="field"><label>${f.alias}</label><textarea data-field="${f.name}" data-type="${f.type}" rows="4" spellcheck="true" lang="es">${esc(val)}</textarea></div>`;
       } else {
           const spellAttr = type === "text" ? 'spellcheck="true" lang="es"' : '';
           html += `<div class="field"><label>${f.alias}</label>
-            <input type="${type}" data-field="${f.name}" value="${esc(val)}" ${isWeight?'step="0.01"':''} ${spellAttr} />
+            <input type="${type}" data-field="${f.name}" data-type="${f.type}" value="${esc(inputVal)}" ${isWeight?'step="0.01"':''} ${spellAttr} />
             ${isWeight ? `<span class="weight-helper" style="font-size:11px; font-weight:bold; margin-top:4px;"></span>` : ''}
           </div>`;
       }
@@ -618,7 +628,7 @@ async function checkWeight(key) {
   } catch(e) {}
 }
 
-/* ===== 7. GUARDADO CON EXTRACCIÓN FUERTE Y MANEJO DE ERRORES REALES ===== */
+/* ===== 7. GUARDADO CON VALIDACIONES Y AUDITORÍA ===== */
 async function save() {
   const key = currentEntityKey, attrs = {};
   const isUpdate = !!editingRow;
@@ -629,8 +639,24 @@ async function save() {
   
   if(metaCache[key].fieldsByName["PersonaUltimaEdicionID"]) attrs.PersonaUltimaEdicionID = SESSION.personaID;
 
+  // LÓGICA FUERTE DE TIPOS PARA POST
   formDyn.querySelectorAll("[data-field]").forEach(el => { 
-    let v = el.value; if(el.type === "number" && v !== "") v = Number(v); if(v === "") v = null;
+    let v = el.value; 
+    const fType = el.getAttribute("data-type");
+
+    if (v === "") {
+        v = null;
+    } else if (el.type === "number" || fType === "esriFieldTypeDouble" || fType === "esriFieldTypeInteger" || fType === "esriFieldTypeSmallInteger") {
+        v = Number(v);
+    } else if (el.type === "date" || fType === "esriFieldTypeDate") {
+        // Asegurar que si es un string de fecha pase a Epoch MS, o mantener si ya es epoch.
+        if (v.includes("-")) {
+            v = new Date(v + "T12:00:00Z").getTime();
+        } else {
+            v = Number(v);
+        }
+    }
+
     attrs[el.getAttribute("data-field")] = v; 
   });
 
@@ -639,7 +665,6 @@ async function save() {
 
   if(key === "CFG_Actividad") attrs["Nombre"] = attrs["NombreActividad"];
 
-  // Validación Fuerte y Sincronización para REP_AvanceTarea (Edit robusto)
   if (key === "REP_AvanceTarea") {
       const respGid = attrs["ResponsableGlobalID"];
       if (!respGid) {
@@ -651,7 +676,6 @@ async function save() {
       const personObj = catalogs["SEG_Persona"]?.find(p => p.GlobalID === respGid);
       if (!personObj) throw new Error("El responsable seleccionado no pudo resolverse en el catálogo SEG_Persona.");
       
-      // La fuente de verdad del texto siempre es el catálogo
       attrs["Responsable"] = personObj.Nombre;
 
       if (isUpdate) {
@@ -696,6 +720,7 @@ async function save() {
           throw new Error(`Error al crear: ${errDesc}`);
       }
       
+      // MOSTRAR EL ERROR REAL DEVUELTO POR ARCGIS
       if (res.updateResults && res.updateResults.length > 0 && !res.updateResults[0].success) {
           const errDesc = res.updateResults[0].error?.description || res.updateResults[0].error?.message || "Error desconocido";
           throw new Error(`Error al actualizar: ${errDesc}`);
