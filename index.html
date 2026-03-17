@@ -54,6 +54,7 @@
       <div class="topbar__right">
         <div class="pill" id="pill-user">Usuario: —</div>
         <div class="pill" id="pill-service">Servicio: V3</div>
+        <button class="btn btn--danger" id="btn-open-clone" style="display:none; margin-right:10px;">⚡ Clonar Vigencia</button>
         <button class="btn btn--ghost" id="btn-tables" style="display:none;">☰ Tablas</button>
         <button class="btn btn--ghost" id="btn-reload">Recargar</button>
       </div>
@@ -119,6 +120,51 @@
         </div>
       </div>
     </div>
+
+    <div class="modal" id="modal-clone" aria-hidden="true">
+      <div class="modal__card" role="dialog" aria-modal="true" style="max-width: 500px;">
+        <div class="modal__head" style="background: linear-gradient(90deg, rgba(220,38,38,0.12), rgba(220,38,38,0.05)); border-bottom-color: rgba(220,38,38,0.2);">
+          <div>
+            <div class="modal__title" style="color: #7a1d1d;">Clonar vigencia de planeación</div>
+            <div class="muted">Preparación de tablas anuales (PLAN_).</div>
+          </div>
+          <button class="btn btn--ghost" id="btn-close-clone">Cerrar</button>
+        </div>
+        <div class="modal__body">
+          <p class="muted" style="margin-bottom: 16px;">Selecciona la vigencia desde la cual deseas copiar la planeación y la nueva vigencia a generar.</p>
+          <div class="formgrid" style="grid-template-columns: 1fr;">
+            <div class="field">
+              <label>Vigencia Origen (Desde)</label>
+              <select id="sel-clone-origen">
+                <option value="">- Seleccione -</option>
+                <option value="2024">2024</option>
+                <option value="2025">2025</option>
+                <option value="2026">2026</option>
+              </select>
+            </div>
+            <div class="field" style="margin-top: 8px;">
+              <label>Vigencia Destino (Hacia)</label>
+              <select id="sel-clone-destino">
+                <option value="">- Seleccione -</option>
+                <option value="2024">2024</option>
+                <option value="2025">2025</option>
+                <option value="2026">2026</option>
+              </select>
+            </div>
+          </div>
+          <div style="margin-top: 20px; padding: 12px; background: #fff5f5; border: 1px solid #fed7d7; border-radius: 8px; font-size: 12px; color: #991b1b;">
+            <strong>⚠️ Atención:</strong> Este proceso copiará exclusivamente las tablas <b>PLAN_SubActividadVigencia</b> y <b>PLAN_TareaVigencia</b> (incluyendo topes). No duplicará registros que ya existan en la vigencia destino.
+          </div>
+        </div>
+        <div class="modal__foot">
+          <div class="muted" id="clone-status">Solo disponible para SuperAdmin.</div>
+          <div class="modal__actions">
+            <button class="btn btn--danger" id="btn-exec-clone">Ejecutar</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
   </div>
 
   <script src="script.js"></script>

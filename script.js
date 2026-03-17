@@ -1,7 +1,7 @@
 /* ===========================================================
    DATA-PAC | Admin OAP V3 (script.js)
-   - OTP Auth, RBAC, Sorting, Auditoría, Personas Genéricas
-   - MEJORA: UI SUPERADMIN Robustecida, Acción "Duplicar Registro", Reglas de Tope Acumulado
+   - OTP Auth, RBAC, Auditoría, Personas Genéricas, Duplicar
+   - MEJORA: Clonación Restringida, Topes PLAN_TareaVigencia reales
    =========================================================== */
 
 const SERVICE_URL = "https://services6.arcgis.com/yq6pe3Lw2oWFjWtF/arcgis/rest/services/DATAPAC_V3/FeatureServer";
@@ -169,12 +169,12 @@ async function initSession() {
   try {
     const resR = await fetchJson(entityUrl("SEG_PersonaRol") + "/query", { f: "json", where: `PersonaID='${SESSION.personaID}' AND Activo='SI'`, outFields: "RolID", returnGeometry: false });
     
-    // EXTRACCIÓN ROBUSTA DE ROLES (Limpiando espacios y forzando mayúsculas)
+    // DEPURACIÓN Y NORMALIZACIÓN DE ROL: Extracción limpia en mayúsculas
     SESSION.roles = (resR.features || []).map(f => String(f.attributes.RolID).trim().toUpperCase());
     if(SESSION.roles.some(r => r === "SUPERADMIN")) SESSION.isSuperAdmin = true;
     if(SESSION.roles.length === 1 && SESSION.roles[0] === "VISUALIZADOR") SESSION.isVisualizador = true;
 
-    console.log("--- DEPURACIÓN SESIÓN ---");
+    console.log("--- Validación de Permisos ---");
     console.log("Roles del usuario:", SESSION.roles);
     console.log("¿Es SuperAdmin?:", SESSION.isSuperAdmin);
 
@@ -193,17 +193,14 @@ async function initSession() {
     await loadCatalogs();
     document.getElementById("otp-overlay").style.display = "none"; uiApp.style.display = "flex";
     document.getElementById("pill-user").textContent = `Usuario: ${SESSION.nombre} (${SESSION.roles.join(", ")})`;
-    buildDynamicMenu();
     
-    // GESTIÓN ROBUSTA DEL BOTÓN CLONAR
+    // FORZAR VISIBILIDAD DE CLONAR (Solo SuperAdmin)
     const btnClone = document.getElementById("btn-open-clone");
-    if (SESSION.isSuperAdmin && btnClone) {
-        btnClone.style.display = "inline-flex";
-        console.log("Botón 'Clonar Vigencia' habilitado por permisos de SuperAdmin.");
-    } else if (btnClone) {
-        btnClone.style.display = "none";
+    if (btnClone) {
+        btnClone.style.display = SESSION.isSuperAdmin ? "inline-flex" : "none";
     }
-
+    
+    buildDynamicMenu();
   } catch(e) { setStatus(e.message, "error", true); }
 }
 
@@ -415,13 +412,12 @@ function renderTable() {
   }).join("");
   document.getElementById("tbl-head").innerHTML = `<tr><th style="width:200px;">Acciones</th>${ths}</tr>`;
 
-  // La funcionalidad Duplicar aplica funcionalmente en estructuras y planeación
   const allowDuplicate = key.startsWith("CFG_") || key.startsWith("PLAN_");
 
   document.getElementById("tbl-body").innerHTML = sortedRows.map(r => {
     const oid = r.attributes.OBJECTID;
     let tds = `<td><div class="rowactions">
-      <button class="btn btn--ghost btn-xs" onclick="openModalForm(${oid})" ${canWrite?'':'disabled'}>${canWrite?'Editar':'Ver'}</button>
+      <button class="btn btn--ghost btn-xs" onclick="openModalForm(${oid}, false)" ${canWrite?'':'disabled'}>${canWrite?'Editar':'Ver'}</button>
       ${allowDuplicate && canWrite ? `<button class="btn btn--ghost btn-xs" onclick="openModalForm(${oid}, true)">Duplicar</button>` : ''}
       ${canDel ? `<button class="btn btn--danger btn-xs" onclick="confirmDelete(${oid})">Eliminar</button>` : ''}
     </div></td>`;
@@ -475,16 +471,15 @@ window.confirmDelete = async function(oid) {
   }
 };
 
-/* ===== 6. FORMULARIOS (Manejo de "Duplicar" Integrado) ===== */
+/* ===== 6. FORMULARIOS (Integración de Topes y "Duplicar") ===== */
 function openModalForm(oid = null, isDuplicate = false) {
   const key = currentEntityKey; 
-  window.isDuplicating = isDuplicate; // Guardamos el modo interno
-
+  window.isDuplicating = isDuplicate; 
   editingRow = oid ? currentRows.find(x => x.attributes.OBJECTID === oid) : null;
   
   if (isDuplicate) {
       document.getElementById("modal-title").textContent = `Duplicar ${key}`;
-      document.getElementById("btn-delete").style.display = "none"; // Un registro duplicado no está guardado aún
+      document.getElementById("btn-delete").style.display = "none";
   } else {
       document.getElementById("modal-title").textContent = oid ? `Editar ${key}` : `Nuevo ${key}`;
       document.getElementById("btn-delete").style.display = (oid && canDelete()) ? "inline-flex" : "none";
@@ -519,7 +514,6 @@ function openModalForm(oid = null, isDuplicate = false) {
   sortedFields.forEach(f => {
     if(techFields.includes(f.name)) return;
 
-    // Si duplicamos, se auto-llenan los campos con el originario para facilitar la tarea
     const val = editingRow ? editingRow.attributes[f.name] : (f.name === "Vigencia" ? document.getElementById("sel-vigencia").value : "");
     const dom = metaCache[key].domainsByField[f.name];
     const isFK = FK_MAPPING[f.name];
@@ -618,7 +612,6 @@ function openModalForm(oid = null, isDuplicate = false) {
     checkWeight(key);
   }
 
-  // Visibilidad condicional exclusiva de Topes para PLAN_TareaVigencia
   if (key === "PLAN_TareaVigencia") {
       const elAplica = formDyn.querySelector('[data-field="AplicaTopeAcumulado"]');
       const toggleTopes = () => {
@@ -655,9 +648,7 @@ async function checkWeight(key) {
   
   try {
     const r = await fetchJson(`${entityUrl(key)}/query`, { f: "json", where: w, outFields: `OBJECTID,${rule.weight}`, returnGeometry: false });
-    let sum = 0; 
-    // En modo Duplicar, el registro aún no existe para AGOL, por lo que NO se excluye al calcular el peso residual.
-    const myOid = (editingRow && !window.isDuplicating) ? editingRow.attributes.OBJECTID : null;
+    let sum = 0; const myOid = (editingRow && !window.isDuplicating) ? editingRow.attributes.OBJECTID : null;
     (r.features || []).forEach(f => { if(f.attributes.OBJECTID !== myOid) sum += (f.attributes[rule.weight] || 0); });
     
     const current = Number(wInp.value) || 0; const total = sum + current;
@@ -667,16 +658,14 @@ async function checkWeight(key) {
   } catch(e) {}
 }
 
-/* ===== 7. GUARDADO CON VALIDACIONES (TOPES, DUPLICADOS Y AUDITORÍA) ===== */
+/* ===== 7. GUARDADO CON VALIDACIONES (TOPES Y DUPLICADOS) ===== */
 async function save() {
   const key = currentEntityKey, attrs = {};
-  
-  // Un registro se "Actualiza" si hay edición normal. Si estamos duplicando, opera como nuevo registro.
   const isUpdate = !!editingRow && !window.isDuplicating;
   const isDuplicate = window.isDuplicating;
   const originalAttrs = editingRow ? editingRow.attributes : null;
 
-  if (isUpdate) attrs.OBJECTID = originalAttrs.OBJECTID;
+  if(isUpdate) attrs.OBJECTID = originalAttrs.OBJECTID;
   else attrs.GlobalID = generateGUID(); 
   
   if(metaCache[key].fieldsByName["PersonaUltimaEdicionID"]) attrs.PersonaUltimaEdicionID = SESSION.personaID;
@@ -697,7 +686,6 @@ async function save() {
 
   if(key === "CFG_Actividad") attrs["Nombre"] = attrs["NombreActividad"];
 
-  // Personas Genéricas
   if (PERSON_FIELDS_CONFIG[key]) {
       for (let pConf of PERSON_FIELDS_CONFIG[key]) {
           const selGid = attrs[pConf.guidF];
@@ -712,23 +700,18 @@ async function save() {
       }
   }
 
-  // Topes Acumulados (PLAN_TareaVigencia)
   if (key === "PLAN_TareaVigencia" && (attrs["AplicaTopeAcumulado"] === "SI" || attrs["AplicaTopeAcumulado"] === "Si")) {
-      const t1 = Number(attrs["TopeAcumT1"]) || 0;
-      const t2 = Number(attrs["TopeAcumT2"]) || 0;
-      const t3 = Number(attrs["TopeAcumT3"]) || 0;
-      const t4 = Number(attrs["TopeAcumT4"]) || 0;
+      const t1 = Number(attrs["TopeAcumT1"]) || 0; const t2 = Number(attrs["TopeAcumT2"]) || 0;
+      const t3 = Number(attrs["TopeAcumT3"]) || 0; const t4 = Number(attrs["TopeAcumT4"]) || 0;
       if (!(t1 >= 0 && t1 <= t2 && t2 <= t3 && t3 <= t4 && t4 <= 100)) {
           throw new Error("Los topes acumulados deben ser numéricos, crecientes y no superar 100%. Revise los valores de Máximo T1, T2, T3 y T4.");
       }
   }
 
-  // Reporte Acumulado (REP_AvanceTarea)
   if (key === "REP_AvanceTarea") {
       const tareaId = attrs["TareaGlobalID"];
       const vig = attrs["Vigencia"] || document.getElementById("sel-vigencia").value;
-      const perStr = attrs["Periodo"]; 
-      const valor = Number(attrs["ValorReportado"]);
+      const perStr = attrs["Periodo"]; const valor = Number(attrs["ValorReportado"]);
 
       if (tareaId && vig && perStr && !isNaN(valor)) {
           let mappedPer = "";
@@ -738,28 +721,21 @@ async function save() {
           else if (perStr.includes("4") || perStr === "T4") mappedPer = "T4";
 
           if (mappedPer) {
-              const planRes = await fetchJson(`${entityUrl("PLAN_TareaVigencia")}/query`, {
-                  f: "json", where: `TareaGlobalID='${tareaId}' AND Vigencia=${vig}`,
-                  outFields: "AplicaTopeAcumulado,TopeAcumT1,TopeAcumT2,TopeAcumT3,TopeAcumT4", returnGeometry: false
-              });
+              const planRes = await fetchJson(`${entityUrl("PLAN_TareaVigencia")}/query`, { f: "json", where: `TareaGlobalID='${tareaId}' AND Vigencia=${vig}`, outFields: "AplicaTopeAcumulado,TopeAcumT1,TopeAcumT2,TopeAcumT3,TopeAcumT4", returnGeometry: false });
               if (planRes.features && planRes.features.length > 0) {
                   const pAttrs = planRes.features[0].attributes;
                   if (pAttrs.AplicaTopeAcumulado === "SI" || pAttrs.AplicaTopeAcumulado === "Si") {
                       const maxVal = Number(pAttrs[`TopeAcum${mappedPer}`]);
-                      if (!isNaN(maxVal) && valor > maxVal) {
-                          throw new Error(`Esta tarea tiene tope acumulado para ${mappedPer}. El máximo permitido es ${maxVal}%.`);
-                      }
+                      if (!isNaN(maxVal) && valor > maxVal) throw new Error(`Esta tarea tiene tope acumulado para ${mappedPer}. El máximo permitido es ${maxVal}%.`);
                   }
               }
           }
       }
   }
 
-  // PREVENCIÓN DE DUPLICADOS EXACTOS (CFG_)
   const uniqueField = UNIQUE_FIELDS[key];
   if (uniqueField && attrs[uniqueField]) {
-      const codeVal = attrs[uniqueField];
-      const fMeta = metaCache[key].fieldsByName[uniqueField];
+      const codeVal = attrs[uniqueField]; const fMeta = metaCache[key].fieldsByName[uniqueField];
       const isStr = fMeta && fMeta.type === "esriFieldTypeString";
       
       let dupWhere = `${uniqueField} = ${isStr ? `'${codeVal}'` : codeVal}`;
@@ -772,29 +748,21 @@ async function save() {
           if(inputEl) { inputEl.classList.add("field-error"); inputEl.focus(); }
           let errMsg = `No se puede guardar: Ya existe un registro con el código '${codeVal}'`;
           if (attrs.Vigencia) errMsg += ` para la vigencia ${attrs.Vigencia}`;
-          errMsg += (isDuplicate) ? " (Debe cambiar el código al duplicar)." : "."; 
+          errMsg += isDuplicate ? " (Debe cambiar el código al duplicar)." : ".";
           throw new Error(errMsg);
       }
   }
 
-  // PREVENCIÓN DE DUPLICADOS COMBINADOS (PLAN_)
   if (!isUpdate && (key === "PLAN_SubActividadVigencia" || key === "PLAN_TareaVigencia")) {
-      const fkField = PARENT_RULES[key].fk;
-      const fkVal = attrs[fkField];
+      const fkField = PARENT_RULES[key].fk; const fkVal = attrs[fkField];
       const vigVal = attrs.Vigencia || document.getElementById("sel-vigencia").value;
       if (fkVal && vigVal) {
           const dupWherePlan = `${fkField} = '${fkVal}' AND Vigencia = ${vigVal}`;
           const dupCheckPlan = await fetchJson(`${entityUrl(key)}/query`, { f: "json", where: dupWherePlan, outFields: "OBJECTID", returnGeometry: false });
           if (dupCheckPlan.features && dupCheckPlan.features.length > 0) {
-              throw new Error(`No se puede guardar: Ya existe un registro para la combinación Padre + Vigencia (${vigVal}). Si está duplicando, debe seleccionar otra vigencia u otro padre.`);
+              throw new Error(`No se puede guardar: Ya existe un registro para la combinación Padre + Vigencia (${vigVal}). Si está duplicando, seleccione otra vigencia u otro padre.`);
           }
       }
-  }
-
-  if (isDuplicate) {
-      console.log("--- DEPURACIÓN MODO DUPLICAR ---");
-      console.log("Entidad:", key);
-      console.log("Payload a insertar como NUEVO:", attrs);
   }
 
   const url = `${entityUrl(key)}/applyEdits`;
@@ -803,13 +771,8 @@ async function save() {
   try {
       const res = await postForm(url, p);
       if (res.error) throw new Error(res.error.message || "Error genérico en el servidor.");
-      
-      if (res.addResults && res.addResults.length > 0 && !res.addResults[0].success) {
-          throw new Error(`Error al crear: ${res.addResults[0].error?.description || "Error desconocido"}`);
-      }
-      if (res.updateResults && res.updateResults.length > 0 && !res.updateResults[0].success) {
-          throw new Error(`Error al actualizar: ${res.updateResults[0].error?.description || "Error desconocido"}`);
-      }
+      if (res.addResults && res.addResults.length > 0 && !res.addResults[0].success) throw new Error(`Error al crear: ${res.addResults[0].error?.description || "Desconocido"}`);
+      if (res.updateResults && res.updateResults.length > 0 && !res.updateResults[0].success) throw new Error(`Error al actualizar: ${res.updateResults[0].error?.description || "Desconocido"}`);
       
       const resultingObjectId = isUpdate ? attrs.OBJECTID : res.addResults[0].objectId;
       const resultingGlobalId = isUpdate ? originalAttrs.GlobalID : attrs.GlobalID;
@@ -842,7 +805,39 @@ document.getElementById("btn-save").addEventListener("click", async () => {
   try { btn.disabled = true; btn.textContent = "Guardando... ⏳"; setStatus("Verificando datos y enviando...", "info"); await save(); setStatus("Guardado con éxito.", "success"); } catch(e) { setStatus(e.message, "error"); } finally { btn.disabled = false; btn.textContent = originalText; }
 });
 
-/* ===== 8. EVENTOS Y CLONACIÓN ===== */
+/* ===== 8. BORRADO DESDE MODAL ===== */
+document.getElementById("btn-delete").addEventListener("click", async () => {
+  const key = currentEntityKey; if(!editingRow || !canDelete()) return;
+  if (!confirm(`¿Estás seguro de que deseas eliminar este registro de ${key}? Esta acción es irreversible.`)) return;
+
+  const btn = document.getElementById("btn-delete"); btn.disabled = true; btn.textContent = "Eliminando... ⏳"; setStatus("Verificando dependencias...", "info");
+  const parentGid = editingRow.attributes.GlobalID, oid = editingRow.attributes.OBJECTID;
+  
+  try {
+    if(parentGid) {
+      for(let r of CHILDREN_RULES.filter(x => x.parent === key)) {
+        const check = await fetchJson(`${entityUrl(r.child)}/query`, { f: "json", where: `${r.fk}='${parentGid}'`, outFields: "OBJECTID", returnGeometry: false });
+        if(check.features?.length > 0) {
+            await writeAuditEvent("DELETE_BLOCKED", key, parentGid, "BLOCKED", `Dependencias en ${r.child}`);
+            alert(`⚠️ NO SE PUEDE ELIMINAR:\nEste registro tiene elementos hijos en la tabla [${r.child}].\n\nDebes eliminar primero los hijos vinculados.`); throw new Error(`Dependencias encontradas en ${r.child}.`);
+        }
+      }
+    }
+    const res = await postForm(`${entityUrl(key)}/applyEdits`, { deletes: String(oid) });
+    if(res.error) throw new Error(res.error.message || "Error al eliminar");
+    if(res.deleteResults && res.deleteResults.length > 0 && !res.deleteResults[0].success) throw new Error(`Error al eliminar: ${res.deleteResults[0].error?.description || "Desconocido"}`);
+    
+    await writeAuditEvent("DELETE", key, parentGid, "OK", "Registro eliminado.");
+    await writeAuditHistory(key, oid, parentGid, "__DELETE__", serializeAuditRecord(editingRow.attributes), "", "");
+
+    document.getElementById("modal").classList.remove("is-open"); await loadCatalogs(); await loadEntity(key, false); setStatus("Registro eliminado exitosamente.", "success");
+  } catch(e) { 
+    if (!e.message.includes("Dependencias encontradas")) await writeAuditEvent("DELETE", key, parentGid, "ERROR", e.message);
+    setStatus(e.message, "error"); 
+  } finally { btn.disabled = false; btn.textContent = "Eliminar"; }
+});
+
+/* ===== 9. EVENTOS Y CLONACIÓN ===== */
 document.getElementById("btn-close").addEventListener("click", () => document.getElementById("modal").classList.remove("is-open"));
 document.getElementById("btn-reload").addEventListener("click", () => loadEntity(currentEntityKey, false));
 document.getElementById("btn-new").addEventListener("click", () => openModalForm(null, false));
@@ -853,64 +848,69 @@ document.getElementById("txt-search").addEventListener("input", () => {
     clearTimeout(tOut); tOut = setTimeout(() => { if(currentEntityKey) loadEntity(currentEntityKey, false); }, 350); 
 });
 
-/* Lógica del Modal de Clonación Segura */
-document.getElementById("btn-open-clone").addEventListener("click", () => {
-    if(!SESSION.isSuperAdmin) {
-        alert("Acceso denegado: Privilegios insuficientes.");
-        return;
-    }
-    document.getElementById("modal-clone").classList.add("is-open");
-});
-
-document.getElementById("btn-close-clone").addEventListener("click", () => {
-    document.getElementById("modal-clone").classList.remove("is-open");
-});
-
-document.getElementById("btn-exec-clone").addEventListener("click", async () => {
-    if(!SESSION.isSuperAdmin) return;
-    
-    const origen = document.getElementById("sel-clone-origen").value;
-    const destino = document.getElementById("sel-clone-destino").value;
-    
-    if(!origen || !destino) return alert("Debe seleccionar vigencia origen y destino.");
-    if(origen === destino) return alert("El origen y el destino no pueden ser iguales.");
-    
-    const conf1 = confirm(`¿Está seguro de que desea clonar la vigencia ${origen} hacia la vigencia ${destino}? Esta acción creará registros nuevos en las tablas anuales de planeación.`);
-    if(!conf1) return;
-    
-    const conf2 = confirm(`Confirme nuevamente: se clonarán masivamente registros desde ${origen} hacia ${destino}. No debe ejecutar este proceso dos veces para la misma combinación.`);
-    if(!conf2) return;
-    
-    const btn = document.getElementById("btn-exec-clone");
-    btn.disabled = true;
-    btn.textContent = "Clonando... ⏳";
-    setStatus(`Iniciando clonación de ${origen} a ${destino}...`, "info");
-    
-    try {
-        const resSub = await processClone("PLAN_SubActividadVigencia", origen, destino, "SubActividadGlobalID");
-        const resTar = await processClone("PLAN_TareaVigencia", origen, destino, "TareaGlobalID");
-        
-        const msg = `Clonación finalizada:\n\n- PLAN_SubActividadVigencia: ${resSub.created} creados, ${resSub.skipped} omitidos, ${resSub.errors} errores\n- PLAN_TareaVigencia: ${resTar.created} creados, ${resTar.skipped} omitidos, ${resTar.errors} errores`;
-        
-        alert(msg);
-        setStatus("Clonación completada.", "success");
-        
-        await writeAuditEvent("CLONE_VIGENCIA", "PLAN_SubActividadVigencia / PLAN_TareaVigencia", "", "OK", `Clonación de ${origen} hacia ${destino}. SubActividades: ${resSub.created}. Tareas: ${resTar.created}.`);
-        
+/* Asignación Defensiva del Botón Clonar */
+const btnOpenClone = document.getElementById("btn-open-clone");
+if (btnOpenClone) {
+    btnOpenClone.addEventListener("click", () => {
+        if(!SESSION.isSuperAdmin) return alert("Acceso denegado: Privilegios insuficientes.");
+        document.getElementById("modal-clone").classList.add("is-open");
+    });
+}
+const btnCloseClone = document.getElementById("btn-close-clone");
+if (btnCloseClone) {
+    btnCloseClone.addEventListener("click", () => {
         document.getElementById("modal-clone").classList.remove("is-open");
-        if(currentEntityKey) await loadEntity(currentEntityKey, false);
-    } catch(e) {
-        setStatus(`Error crítico en clonación: ${e.message}`, "error");
-        await writeAuditEvent("CLONE_VIGENCIA", "Varias", "", "ERROR", e.message);
-    } finally {
-        btn.disabled = false;
-        btn.textContent = "Ejecutar";
-    }
-});
+    });
+}
+
+const btnExecClone = document.getElementById("btn-exec-clone");
+if (btnExecClone) {
+    btnExecClone.addEventListener("click", async () => {
+        if(!SESSION.isSuperAdmin) return;
+        
+        const origen = document.getElementById("sel-clone-origen").value;
+        const destino = document.getElementById("sel-clone-destino").value;
+        
+        if(!origen || !destino) return alert("Debe seleccionar vigencia origen y destino.");
+        if(origen === destino) return alert("El origen y el destino no pueden ser iguales.");
+        
+        const conf1 = confirm(`¿Está seguro de que desea clonar la vigencia ${origen} hacia la vigencia ${destino}? Esta acción creará registros nuevos en las tablas anuales de planeación.`);
+        if(!conf1) return;
+        
+        const conf2 = confirm(`Confirme nuevamente: se clonarán masivamente registros desde ${origen} hacia ${destino}. No debe ejecutar este proceso dos veces para la misma combinación.`);
+        if(!conf2) return;
+        
+        btnExecClone.disabled = true;
+        btnExecClone.textContent = "Clonando... ⏳";
+        setStatus(`Iniciando clonación de ${origen} a ${destino}...`, "info");
+        
+        try {
+            const resSub = await processClone("PLAN_SubActividadVigencia", origen, destino, "SubActividadGlobalID");
+            const resTar = await processClone("PLAN_TareaVigencia", origen, destino, "TareaGlobalID");
+            
+            const msg = `Clonación finalizada:\n\n- PLAN_SubActividadVigencia: ${resSub.created} creados, ${resSub.skipped} omitidos, ${resSub.errors} errores\n- PLAN_TareaVigencia: ${resTar.created} creados, ${resTar.skipped} omitidos, ${resTar.errors} errores`;
+            
+            alert(msg);
+            setStatus("Clonación completada.", "success");
+            
+            await writeAuditEvent("CLONE_VIGENCIA", "PLAN_SubActividadVigencia / PLAN_TareaVigencia", "", "OK", `Clonación de ${origen} hacia ${destino}. SubActividades: ${resSub.created}. Tareas: ${resTar.created}.`);
+            
+            document.getElementById("modal-clone").classList.remove("is-open");
+            if(currentEntityKey) await loadEntity(currentEntityKey, false);
+        } catch(e) {
+            setStatus(`Error crítico en clonación: ${e.message}`, "error");
+            await writeAuditEvent("CLONE_VIGENCIA", "Varias", "", "ERROR", e.message);
+        } finally {
+            btnExecClone.disabled = false;
+            btnExecClone.textContent = "Ejecutar";
+        }
+    });
+}
 
 async function processClone(entityKey, origen, destino, fkField) {
     const result = { created: 0, skipped: 0, errors: 0 };
     
+    // outFields="*" garantiza que todos los campos nuevos (como AplicaTopeAcumulado, etc.) se capturen
     const sourceRes = await fetchJson(`${entityUrl(entityKey)}/query`, { f:"json", where:`Vigencia=${origen}`, outFields:"*", returnGeometry:false });
     const sourceRows = sourceRes.features || [];
     if(sourceRows.length === 0) return result;
