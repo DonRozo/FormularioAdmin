@@ -28,12 +28,14 @@ const PARENT_RULES = {
   PLAN_SubActividadVigencia: { fk: "SubActividadGlobalID", parent: "CFG_SubActividad", weight: "PesoSubActividad" },
   PLAN_TareaVigencia: { fk: "TareaGlobalID", parent: "CFG_Tarea", weight: "PesoTarea" }
 };
+
 const FK_MAPPING = {
   PACGlobalID: "CFG_PAC", LineaGlobalID: "CFG_Linea", ProgramaGlobalID: "CFG_Programa",
   ProyectoGlobalID: "CFG_Proyecto", ObjetivoGlobalID: "CFG_Objetivo", ActividadGlobalID: "CFG_Actividad",
   SubActividadGlobalID: "CFG_SubActividad", TareaGlobalID: "CFG_Tarea", PersonaGlobalID: "SEG_Persona",
   RolID: "SEG_Rol"
 };
+
 const CHILDREN_RULES = [
   { parent: "CFG_PAC", child: "CFG_Linea", fk: "PACGlobalID" }, { parent: "CFG_Linea", child: "CFG_Programa", fk: "LineaGlobalID" },
   { parent: "CFG_Programa", child: "CFG_Proyecto", fk: "ProgramaGlobalID" }, { parent: "CFG_Proyecto", child: "CFG_Objetivo", fk: "ProyectoGlobalID" },
@@ -41,6 +43,7 @@ const CHILDREN_RULES = [
   { parent: "CFG_SubActividad", child: "CFG_Tarea", fk: "SubActividadGlobalID" }, { parent: "CFG_SubActividad", child: "PLAN_SubActividadVigencia", fk: "SubActividadGlobalID" },
   { parent: "CFG_Tarea", child: "PLAN_TareaVigencia", fk: "TareaGlobalID" }
 ];
+
 const UNIQUE_FIELDS = {
   CFG_PAC: "PACID", CFG_Linea: "LineaID", CFG_Programa: "ProgramaID", CFG_Proyecto: "ProyectoID",
   CFG_Objetivo: "ObjetivoID", CFG_Actividad: "ActividadID", CFG_SubActividad: "CodigoSubActividad", CFG_Tarea: "CodigoTarea"
@@ -54,29 +57,49 @@ let currentSort = { col: null, dir: 0 };
 const uiApp = document.getElementById("app-main"), elStatus = document.getElementById("status"), elOtpStatus = document.getElementById("otp-status"), modal = document.getElementById("modal"), formDyn = document.getElementById("form-dynamic");
 
 function setStatus(msg, type="info", isOtp=false){
-  const el = isOtp ? elOtpStatus : elStatus; if(!el) return;
-  el.textContent = (type==="error"?"❌ ":(type==="success"?"✅ ":"ℹ️ ")) + msg;
-  el.style.color = type==="error" ? "#d64545" : "inherit";
+  const el = isOtp ? elOtpStatus : elStatus; 
+  if(!el) return;
+  el.textContent = (type === "error" ? "❌ " : (type === "success" ? "✅ " : "ℹ️ ")) + msg;
+  el.style.color = type === "error" ? "#d64545" : "inherit";
 }
-function esc(s){ return (s??"").toString().replaceAll("<","&lt;").replaceAll(">","&gt;"); }
-function entityUrl(key){ return `${SERVICE_URL}/${ENTITY[key].id}`; }
-function isReadOnly(key){ return HARD_READONLY.has(key) || !hasWritePermission(key); }
-function canDelete(){ return SESSION.isSuperAdmin; } 
-function generateGUID() { return '{' + crypto.randomUUID().toUpperCase() + '}'; }
+
+function esc(s){ 
+  return (s ?? "").toString().replaceAll("<","&lt;").replaceAll(">","&gt;"); 
+}
+
+function entityUrl(key){ 
+  return `${SERVICE_URL}/${ENTITY[key].id}`; 
+}
+
+function isReadOnly(key){ 
+  return HARD_READONLY.has(key) || !hasWritePermission(key); 
+}
+
+function canDelete(){ 
+  return SESSION.isSuperAdmin; 
+} 
+
+function generateGUID() { 
+  return '{' + crypto.randomUUID().toUpperCase() + '}'; 
+}
 
 /* ===== FETCH & POST CORE (Caché Buster) ===== */
 async function fetchJson(url, params){
-  const u = new URL(url); Object.entries(params||{}).forEach(([k,v])=>u.searchParams.set(k,v));
+  const u = new URL(url); 
+  Object.entries(params||{}).forEach(([k,v]) => u.searchParams.set(k,v));
   u.searchParams.set('_ts', Date.now()); 
-  const r = await fetch(u.toString(), { method:"GET", cache: "no-store" }); 
-  if(!r.ok) throw new Error(`HTTP ${r.status}`); return await r.json();
+  const r = await fetch(u.toString(), { method: "GET", cache: "no-store" }); 
+  if(!r.ok) throw new Error(`HTTP ${r.status}`); 
+  return await r.json();
 }
+
 async function postForm(url, obj){
-  const form = new URLSearchParams(); form.append("f", "json");
+  const form = new URLSearchParams(); 
+  form.append("f", "json");
   if(obj.adds) form.append("adds", JSON.stringify(obj.adds));
   if(obj.updates) form.append("updates", JSON.stringify(obj.updates));
   if(obj.deletes) form.append("deletes", obj.deletes);
-  const r = await fetch(url, { method:"POST", headers:{ "Content-Type":"application/x-www-form-urlencoded" }, body: form });
+  const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: form });
   return await r.json();
 }
 
@@ -84,8 +107,10 @@ async function postForm(url, obj){
 function serializeAuditRecord(attrs) {
   const clean = { ...attrs };
   delete clean.Shape; delete clean.CreationDate; delete clean.Creator; delete clean.EditDate; delete clean.Editor;
-  const str = JSON.stringify(clean); return str.length > 1000 ? str.substring(0, 997) + "..." : str;
+  const str = JSON.stringify(clean); 
+  return str.length > 1000 ? str.substring(0, 997) + "..." : str;
 }
+
 async function writeAuditEvent(tipo, entidad, objGid, resultado, detalle) {
   if (!SESSION.personaID) return;
   try {
@@ -93,90 +118,139 @@ async function writeAuditEvent(tipo, entidad, objGid, resultado, detalle) {
     await postForm(`${entityUrl("AUD_EventoSistema")}/applyEdits`, { adds: [{attributes: attrs}] });
   } catch(e) { console.warn("Auditoría Evento falló:", e); }
 }
+
 async function writeAuditHistory(tipoObj, objId, objGid, campo, valAnt, valNuevo, motivo) {
   if (!SESSION.personaID) return;
   try {
-    const attrs = { GlobalID: generateGUID(), TipoObjeto: tipoObj, ObjetoID: objId || 0, ObjetoGlobalID: objGid || "", CampoModificado: campo || "", ValorAnterior: valAnt ? String(valAnt).substring(0, 1000) : "", ValorNuevo: valNuevo ? String(valNuevo).substring(0, 1000) : "", PersonaID: SESSION.personaID, FechaCambio: Date.now(), MotivoCambio: motivo || "", OrigenCambio: "APP_ADMIN" };
+    const attrs = { GlobalID: generateGUID(), TipoObjeto: tipoObj, ObjetoID: String(objId || 0), ObjetoGlobalID: objGid || "", CampoModificado: campo || "", ValorAnterior: valAnt ? String(valAnt).substring(0, 1000) : "", ValorNuevo: valNuevo ? String(valNuevo).substring(0, 1000) : "", PersonaID: SESSION.personaID, FechaCambio: Date.now(), MotivoCambio: motivo || "", OrigenCambio: "APP_ADMIN" };
     await postForm(`${entityUrl("AUD_HistorialCambio")}/applyEdits`, { adds: [{attributes: attrs}] });
   } catch(e) { console.warn("Auditoría Historial falló:", e); }
 }
 
 /* ===== 1. AUTENTICACIÓN OTP ===== */
 document.getElementById("btn-request-otp").addEventListener("click", async () => {
-  const ced = document.getElementById("inp-cedula").value.trim(), cor = document.getElementById("inp-correo").value.trim().toLowerCase(), btn = document.getElementById("btn-request-otp");
+  const ced = document.getElementById("inp-cedula").value.trim();
+  const cor = document.getElementById("inp-correo").value.trim().toLowerCase();
+  const btn = document.getElementById("btn-request-otp");
+  
   if(!ced || !cor) return setStatus("Ingresa cédula y correo.", "error", true);
-  btn.disabled = true; btn.textContent = "Validando..."; setStatus("Verificando...", "info", true);
+  
+  btn.disabled = true; 
+  btn.textContent = "Validando..."; 
+  setStatus("Verificando...", "info", true);
+  
   try {
-    const res = await fetchJson(entityUrl("SEG_Persona")+"/query", { f:"json", where:`Cedula='${ced}' AND Correo='${cor}' AND Activo='SI'`, outFields:"GlobalID,PersonaID,Nombre", returnGeometry:false });
-    if(!res.features?.length) throw new Error("Credenciales inválidas.");
-    const p = res.features[0].attributes; SESSION.personaGlobalID = p.GlobalID; SESSION.personaID = p.PersonaID; SESSION.nombre = p.Nombre;
+    const res = await fetchJson(entityUrl("SEG_Persona") + "/query", { f: "json", where: `Cedula='${ced}' AND Correo='${cor}' AND Activo='SI'`, outFields: "GlobalID,PersonaID,Nombre", returnGeometry: false });
+    if(!res.features || res.features.length === 0) throw new Error("Credenciales inválidas.");
+    
+    const p = res.features[0].attributes; 
+    SESSION.personaGlobalID = p.GlobalID; 
+    SESSION.personaID = p.PersonaID; 
+    SESSION.nombre = p.Nombre;
+    
     btn.textContent = "Generando código...";
     const webhookRes = await fetch(URL_WEBHOOK_POWERAUTOMATE, { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({cedula: ced, correo: cor}) });
+    
     if(webhookRes.status === 200 || webhookRes.status === 202) {
-        document.getElementById("otp-step-1").classList.add("is-hidden"); document.getElementById("otp-step-2").classList.remove("is-hidden"); setStatus("Código enviado.", "success", true);
-    } else throw new Error(`Error PA: ${webhookRes.status}`);
-  } catch(e) { setStatus(e.message, "error", true); } finally { btn.disabled = false; btn.textContent = "Solicitar Código"; }
+        document.getElementById("otp-step-1").classList.add("is-hidden"); 
+        document.getElementById("otp-step-2").classList.remove("is-hidden"); 
+        setStatus("Código enviado.", "success", true);
+    } else {
+        throw new Error(`Error PA: ${webhookRes.status}`);
+    }
+  } catch(e) { 
+    setStatus(e.message, "error", true); 
+  } finally { 
+    btn.disabled = false; 
+    btn.textContent = "Solicitar Código"; 
+  }
 });
 
 document.getElementById("btn-verify-otp").addEventListener("click", async () => {
-  const code = document.getElementById("inp-codigo").value.trim(); if(!code) return;
+  const code = document.getElementById("inp-codigo").value.trim(); 
+  if(!code) return;
+  
   setStatus("Validando código...", "info", true);
   try {
-    const res = await fetchJson(entityUrl("SEG_OTP")+"/query", { f:"json", where:`PersonaGlobalID='${SESSION.personaGlobalID}' AND CodigoHash='${code}' AND Usado='NO'`, outFields:"OBJECTID", returnGeometry:false });
-    if(!res.features?.length) throw new Error("Código incorrecto.");
-    await postForm(entityUrl("SEG_OTP")+"/applyEdits", { updates:[{attributes:{OBJECTID: res.features[0].attributes.OBJECTID, Usado:'SI'}}] });
+    const res = await fetchJson(entityUrl("SEG_OTP") + "/query", { f: "json", where: `PersonaGlobalID='${SESSION.personaGlobalID}' AND CodigoHash='${code}' AND Usado='NO'`, outFields: "OBJECTID", returnGeometry: false });
+    if(!res.features || res.features.length === 0) throw new Error("Código incorrecto.");
+    
+    await postForm(entityUrl("SEG_OTP") + "/applyEdits", { updates: [{attributes: {OBJECTID: res.features[0].attributes.OBJECTID, Usado: 'SI'}}] });
     await writeAuditEvent("OTP_VALIDATE", "SEG_Persona", SESSION.personaGlobalID, "OK", "Ingreso exitoso al panel Admin");
     await initSession();
-  } catch(e) { setStatus(e.message, "error", true); }
+  } catch(e) { 
+    setStatus(e.message, "error", true); 
+  }
 });
 
 document.getElementById("btn-back-otp").addEventListener("click", () => {
-  document.getElementById("otp-step-2").classList.add("is-hidden"); document.getElementById("otp-step-1").classList.remove("is-hidden"); setStatus("", "info", true);
+  document.getElementById("otp-step-2").classList.add("is-hidden"); 
+  document.getElementById("otp-step-1").classList.remove("is-hidden"); 
+  setStatus("", "info", true);
 });
 
 /* ===== 2. CARGA DE SESIÓN Y CATÁLOGOS ===== */
 async function initSession() {
   setStatus("Cargando perfil...", "info", true);
   try {
-    const resR = await fetchJson(entityUrl("SEG_PersonaRol")+"/query", { f:"json", where:`PersonaID='${SESSION.personaID}' AND Activo='SI'`, outFields:"RolID", returnGeometry:false });
-    SESSION.roles = (resR.features||[]).map(f => f.attributes.RolID);
+    const resR = await fetchJson(entityUrl("SEG_PersonaRol") + "/query", { f: "json", where: `PersonaID='${SESSION.personaID}' AND Activo='SI'`, outFields: "RolID", returnGeometry: false });
+    SESSION.roles = (resR.features || []).map(f => f.attributes.RolID);
     if(SESSION.roles.includes("SUPERADMIN")) SESSION.isSuperAdmin = true;
     if(SESSION.roles.length === 1 && SESSION.roles[0] === "VISUALIZADOR") SESSION.isVisualizador = true;
 
-    const resA = await fetchJson(entityUrl("SEG_Alcance")+"/query", { f:"json", where:`PersonaID='${SESSION.personaID}' AND Activo='SI'`, outFields:"NivelJerarquia,ObjetoGlobalID,Permiso", returnGeometry:false });
-    const alcances = (resA.features||[]).map(f => f.attributes);
-    const permWeight = {"Ver":1, "Revisar":2, "Aprobar":3, "Editar":4, "Administrar":5}; let maxW = 0;
-    alcances.forEach(a => { if(permWeight[a.Permiso] > maxW) { maxW = permWeight[a.Permiso]; SESSION.maxPerm = a.Permiso; }});
+    const resA = await fetchJson(entityUrl("SEG_Alcance") + "/query", { f: "json", where: `PersonaID='${SESSION.personaID}' AND Activo='SI'`, outFields: "NivelJerarquia,ObjetoGlobalID,Permiso", returnGeometry: false });
+    const alcances = (resA.features || []).map(f => f.attributes);
+    const permWeight = {"Ver":1, "Revisar":2, "Aprobar":3, "Editar":4, "Administrar":5}; 
+    let maxW = 0;
+    
+    alcances.forEach(a => { 
+        if(permWeight[a.Permiso] > maxW) { 
+            maxW = permWeight[a.Permiso]; 
+            SESSION.maxPerm = a.Permiso; 
+        }
+    });
+    
     if(SESSION.isSuperAdmin) SESSION.maxPerm = "Administrar";
 
-    const resAsig = await fetchJson(entityUrl("SEG_Asignacion")+"/query", { f:"json", where:`PersonaGlobalID='${SESSION.personaGlobalID}' AND Activo='SI'`, outFields:"TareaGlobalID", returnGeometry:false });
-    (resAsig.features||[]).forEach(f => SESSION.assignedTasks.add(f.attributes.TareaGlobalID));
+    const resAsig = await fetchJson(entityUrl("SEG_Asignacion") + "/query", { f: "json", where: `PersonaGlobalID='${SESSION.personaGlobalID}' AND Activo='SI'`, outFields: "TareaGlobalID", returnGeometry: false });
+    (resAsig.features || []).forEach(f => SESSION.assignedTasks.add(f.attributes.TareaGlobalID));
+    
     if(!SESSION.isSuperAdmin) await resolveHierarchy(alcances);
 
     await loadCatalogs();
-    document.getElementById("otp-overlay").style.display = "none"; uiApp.style.display = "flex";
+    document.getElementById("otp-overlay").style.display = "none"; 
+    uiApp.style.display = "flex";
     document.getElementById("pill-user").textContent = `Usuario: ${SESSION.nombre} (${SESSION.roles.join(", ")})`;
     buildDynamicMenu();
-  } catch(e) { setStatus(e.message, "error", true); }
+  } catch(e) { 
+    setStatus(e.message, "error", true); 
+  }
 }
 
 async function resolveHierarchy(alcances) {
   const cfgs = ["CFG_PAC","CFG_Linea","CFG_Programa","CFG_Proyecto","CFG_Objetivo","CFG_Actividad","CFG_SubActividad","CFG_Tarea"];
   cfgs.forEach(c => SESSION.allowedGuids[c] = new Set());
+  
   alcances.forEach(alc => {
     let k = `CFG_${alc.NivelJerarquia.charAt(0) + alc.NivelJerarquia.slice(1).toLowerCase()}`;
-    if(alc.NivelJerarquia==="SUBACTIVIDAD") k = "CFG_SubActividad"; if(alc.NivelJerarquia==="PAC") k = "CFG_PAC";
+    if(alc.NivelJerarquia === "SUBACTIVIDAD") k = "CFG_SubActividad"; 
+    if(alc.NivelJerarquia === "PAC") k = "CFG_PAC";
     if(SESSION.allowedGuids[k] && alc.ObjetoGlobalID) SESSION.allowedGuids[k].add(alc.ObjetoGlobalID);
   });
+  
   const arbol = {};
   for(let c of cfgs) {
-    const r = await fetchJson(entityUrl(c)+"/query", {f:"json", where:"1=1", outFields:"GlobalID,PACGlobalID,LineaGlobalID,ProgramaGlobalID,ProyectoGlobalID,ObjetivoGlobalID,ActividadGlobalID,SubActividadGlobalID", returnGeometry:false});
-    arbol[c] = (r.features||[]).map(f=>f.attributes);
+    const r = await fetchJson(entityUrl(c) + "/query", { f: "json", where: "1=1", outFields: "GlobalID,PACGlobalID,LineaGlobalID,ProgramaGlobalID,ProyectoGlobalID,ObjetivoGlobalID,ActividadGlobalID,SubActividadGlobalID", returnGeometry: false });
+    arbol[c] = (r.features || []).map(f => f.attributes);
   }
+  
   function propagate(pKey, cKey, fk) {
     if(SESSION.allowedGuids[pKey].size === 0) return;
-    arbol[cKey].forEach(row => { if(SESSION.allowedGuids[pKey].has(row[fk])) SESSION.allowedGuids[cKey].add(row.GlobalID); });
+    arbol[cKey].forEach(row => { 
+        if(SESSION.allowedGuids[pKey].has(row[fk])) SESSION.allowedGuids[cKey].add(row.GlobalID); 
+    });
   }
+  
   propagate("CFG_PAC", "CFG_Linea", "PACGlobalID"); propagate("CFG_Linea", "CFG_Programa", "LineaGlobalID");
   propagate("CFG_Programa", "CFG_Proyecto", "ProgramaGlobalID"); propagate("CFG_Proyecto", "CFG_Objetivo", "ProyectoGlobalID");
   propagate("CFG_Objetivo", "CFG_Actividad", "ObjetivoGlobalID"); propagate("CFG_Actividad", "CFG_SubActividad", "ActividadGlobalID");
@@ -184,19 +258,26 @@ async function resolveHierarchy(alcances) {
 }
 
 async function loadCatalogs() {
-  const v = document.getElementById("sel-vigencia").value; const vigW = v ? `Vigencia=${v}` : "1=1";
+  const v = document.getElementById("sel-vigencia").value; 
+  const vigW = v ? `Vigencia=${v}` : "1=1";
+  
   async function fetchCat(k, nameF, extra=""){
     const w = (metaCache[k]?.fieldsByName?.["Vigencia"]) ? vigW : "1=1";
-    const r = await fetchJson(`${entityUrl(k)}/query`, { f:"json", where:w, outFields:`GlobalID,${nameF}${extra}`, orderByFields:`${nameF} ASC`, returnGeometry:false });
-    catalogs[k] = (r.features||[]).map(f=>f.attributes);
+    const r = await fetchJson(`${entityUrl(k)}/query`, { f: "json", where: w, outFields: `GlobalID,${nameF}${extra}`, orderByFields: `${nameF} ASC`, returnGeometry: false });
+    catalogs[k] = (r.features || []).map(f => f.attributes);
   }
-  if(!metaCache["CFG_PAC"]) { for(let k of Object.keys(FK_MAPPING)) await getMeta(FK_MAPPING[k]); }
+  
+  if(!metaCache["CFG_PAC"]) { 
+      for(let k of Object.keys(FK_MAPPING)) await getMeta(FK_MAPPING[k]); 
+  }
+  
   await fetchCat("CFG_PAC", "Nombre", ",PACID"); await fetchCat("CFG_Linea", "Nombre", ",LineaID");
   await fetchCat("CFG_Programa", "Nombre", ",ProgramaID"); await fetchCat("CFG_Proyecto", "Nombre", ",ProyectoID");
   await fetchCat("CFG_Objetivo", "Nombre", ",ObjetivoID"); await fetchCat("CFG_Actividad", "NombreActividad", ",ActividadID");
   await fetchCat("CFG_SubActividad", "NombreSubActividad", ",CodigoSubActividad"); await fetchCat("CFG_Tarea", "NombreTarea", ",CodigoTarea");
   await fetchCat("SEG_Persona", "Nombre", ",Cedula"); await fetchCat("SEG_Rol", "NombreRol", ",RolID");
 }
+
 function labelCatalog(entity, a) {
   if(!a) return "";
   if(entity.includes("PAC")) return `${a.PACID||""} - ${a.Nombre||""}`; if(entity.includes("Linea")) return `${a.LineaID||""} - ${a.Nombre||""}`;
@@ -212,13 +293,16 @@ function buildDynamicMenu() {
   const nav = document.getElementById("navlist"); nav.innerHTML = "";
   const groups = [ { label: "Configuración Base", prefix: "CFG_" }, { label: "Planeación", prefix: "PLAN_" }, { label: "Reportes Operativos", prefix: "REP_" }, { label: "Aprobaciones", prefix: "WF_" }, { label: "Analítica y Finanzas", prefixes: ["BI_", "FIN_"] }, { label: "Seguridad y Auditoría", prefixes: ["SEG_", "AUD_"] } ];
   let vis = new Set();
-  if(SESSION.isSuperAdmin) Object.keys(ENTITY).forEach(k => vis.add(k));
-  else {
+  
+  if(SESSION.isSuperAdmin) {
+      Object.keys(ENTITY).forEach(k => vis.add(k));
+  } else {
     if(SESSION.roles.includes("PUBLICADOR")) { ["WF_SolicitudRevision", "WF_AprobacionPaso", "CFG_PAC", "CFG_Linea", "BI_AvanceActividad", "BI_AvanceObjetivo", "BI_AvanceProyecto", "BI_AvancePrograma", "BI_AvanceLinea", "BI_AvancePAC"].forEach(t => vis.add(t)); ["CFG_Programa", "CFG_Proyecto", "CFG_Objetivo", "CFG_Actividad", "REP_AvanceTarea", "REP_ReporteNarrativo"].forEach(t => { vis.add(t); SESSION.tablePermissions[t] = "Ver"; }); }
     if(SESSION.roles.includes("APROBADOR")) Object.keys(ENTITY).filter(k => k.startsWith("CFG_") || k.startsWith("PLAN_") || k.startsWith("REP_") || k.startsWith("WF_") || k.startsWith("FIN_")).forEach(t => vis.add(t));
     if(SESSION.roles.includes("EDITOR")) { Object.keys(ENTITY).filter(k => k.startsWith("CFG_")).forEach(t => { vis.add(t); SESSION.tablePermissions[t] = "Ver"; }); ["REP_AvanceTarea", "REP_ReporteNarrativo", "WF_SolicitudRevision"].forEach(t => vis.add(t)); }
     if(SESSION.isVisualizador) Object.keys(ENTITY).filter(k => k.startsWith("BI_") || k.startsWith("FIN_") || k.startsWith("CFG_")).forEach(t => { vis.add(t); SESSION.tablePermissions[t] = "Ver"; });
   }
+  
   groups.forEach(g => {
     let html = `<div class="navgroup">${g.label}</div>`, has = false;
     Object.keys(ENTITY).forEach(k => {
@@ -229,47 +313,66 @@ function buildDynamicMenu() {
     if(has) nav.innerHTML += html;
   });
 }
+
 function hasWritePermission(key) {
-  if(HARD_READONLY.has(key)) return false; if(SESSION.isSuperAdmin) return true;
-  if(SESSION.tablePermissions[key] === "Ver" || SESSION.maxPerm === "Ver") return false; return true;
+  if(HARD_READONLY.has(key)) return false; 
+  if(SESSION.isSuperAdmin) return true;
+  if(SESSION.tablePermissions[key] === "Ver" || SESSION.maxPerm === "Ver") return false; 
+  return true;
 }
+
 function buildWhere(key) {
   let w = "1=1", vig = document.getElementById("sel-vigencia").value;
   if(vig && metaCache[key]?.fieldsByName?.["Vigencia"]) w += ` AND Vigencia = ${vig}`;
   if(SESSION.isSuperAdmin) return w;
+  
   if(SESSION.allowedGuids[key]) {
-    const guids = Array.from(SESSION.allowedGuids[key]); if(!guids.length) return "1=0";
+    const guids = Array.from(SESSION.allowedGuids[key]); 
+    if(!guids.length) return "1=0";
     w += ` AND GlobalID IN (${guids.map(g => `'${g}'`).join(",")})`;
   }
+  
   if(["REP_AvanceTarea", "PLAN_TareaVigencia"].includes(key)) {
-    const tG = Array.from(SESSION.assignedTasks); if(!tG.length && SESSION.maxPerm === "Ver") return "1=0"; 
+    const tG = Array.from(SESSION.assignedTasks); 
+    if(!tG.length && SESSION.maxPerm === "Ver") return "1=0"; 
     if(tG.length) w += ` AND TareaGlobalID IN (${tG.map(g => `'${g}'`).join(",")})`;
   }
   return w;
 }
 
-/* ===== 4. TABLA ===== */
+/* ===== 4. TABLA CON ORDENAMIENTO Y LIMPIEZA DE METADATOS ===== */
 async function getMeta(key){
   if(metaCache[key]) return metaCache[key];
   const m = await fetchJson(`${entityUrl(key)}?f=pjson`);
   const fieldsByName = {}, domainsByField = {};
   m.fields.forEach(f => { fieldsByName[f.name] = f; if(f.domain?.codedValues) domainsByField[f.name] = f.domain.codedValues; });
-  metaCache[key] = { fields: m.fields, fieldsByName, domainsByField }; return metaCache[key];
+  metaCache[key] = { fields: m.fields, fieldsByName, domainsByField }; 
+  return metaCache[key];
 }
 
 async function loadEntity(key) {
-  currentEntityKey = key; document.querySelectorAll(".navitem").forEach(b => { b.classList.toggle("is-active", b.textContent.includes(key)); });
+  currentEntityKey = key; 
+  document.querySelectorAll(".navitem").forEach(b => { b.classList.toggle("is-active", b.textContent.includes(key)); });
   document.getElementById("h-entity").textContent = key;
   document.getElementById("btn-new").style.display = (hasWritePermission(key) && !key.startsWith("WF_")) ? "inline-flex" : "none";
-  setStatus("Cargando datos..."); await getMeta(key);
-  const r = await fetchJson(`${entityUrl(key)}/query`, { f:"json", where: buildWhere(key), outFields: "*", returnGeometry:false });
-  currentRows = r.features || []; currentSort = { col: null, dir: 0 };
-  renderTable(); setStatus(`Cargados ${currentRows.length} registros.`, "success");
+  
+  setStatus("Cargando datos..."); 
+  await getMeta(key);
+  const r = await fetchJson(`${entityUrl(key)}/query`, { f: "json", where: buildWhere(key), outFields: "*", returnGeometry: false });
+  currentRows = r.features || []; 
+  currentSort = { col: null, dir: 0 };
+  
+  renderTable(); 
+  setStatus(`Cargados ${currentRows.length} registros.`, "success");
 }
 
 window.toggleSort = function(col) {
-  if(currentSort.col === col) { currentSort.dir = currentSort.dir === 1 ? -1 : (currentSort.dir === -1 ? 0 : 1); if(!currentSort.dir) currentSort.col = null; } 
-  else { currentSort.col = col; currentSort.dir = 1; }
+  if(currentSort.col === col) { 
+      currentSort.dir = currentSort.dir === 1 ? -1 : (currentSort.dir === -1 ? 0 : 1); 
+      if(!currentSort.dir) currentSort.col = null; 
+  } else { 
+      currentSort.col = col; currentSort.dir = 1; 
+  }
   renderTable();
 };
 
@@ -293,4 +396,353 @@ function renderTable() {
   }
 
   const ths = fields.map(f => {
-    let c = ""; if(currentSort.col === f.name) c = currentSort.dir ===
+    let c = ""; if(currentSort.col === f.name) c = currentSort.dir === 1 ? "sort-asc" : "sort-desc";
+    return `<th class="sortable ${c}" onclick="toggleSort('${f.name}')">${f.alias}</th>`;
+  }).join("");
+  
+  document.getElementById("tbl-head").innerHTML = `<tr><th style="width:160px;">Acciones</th>${ths}</tr>`;
+
+  document.getElementById("tbl-body").innerHTML = sortedRows.map(r => {
+    const oid = r.attributes.OBJECTID;
+    let tds = `<td><div class="rowactions">
+      <button class="btn btn--ghost btn-xs" onclick="openModalForm(${oid})" ${canWrite?'':'disabled'}>${canWrite?'Editar':'Ver'}</button>
+      ${canDel ? `<button class="btn btn--danger btn-xs" onclick="confirmDelete(${oid})">Eliminar</button>` : ''}
+    </div></td>`;
+    tds += fields.map(f => {
+      let v = r.attributes[f.name]; if(f.type === "esriFieldTypeDate" && v) v = new Date(v).toLocaleDateString();
+      return `<td>${esc(v)}</td>`;
+    }).join("");
+    return `<tr>${tds}</tr>`;
+  }).join("");
+}
+
+/* ===== 5. BORRADO CON REGLAS Y AUDITORÍA ===== */
+window.confirmDelete = async function(oid) {
+  const key = currentEntityKey;
+  if (!canDelete()) return;
+  const row = currentRows.find(x => x.attributes.OBJECTID === oid);
+  if (!row) return;
+
+  if (!confirm(`¿Estás seguro de que deseas eliminar este registro de ${key}? Esta acción es irreversible.`)) return;
+
+  setStatus("Verificando dependencias...", "info");
+  const parentGid = row.attributes.GlobalID;
+
+  try {
+    if (parentGid) {
+      for (let r of CHILDREN_RULES.filter(x => x.parent === key)) {
+        const check = await fetchJson(`${entityUrl(r.child)}/query`, { f: "json", where: `${r.fk}='${parentGid}'`, outFields: "OBJECTID", returnGeometry: false });
+        if (check.features?.length > 0) {
+            await writeAuditEvent("DELETE_BLOCKED", key, parentGid, "BLOCKED", `Dependencias en ${r.child}`);
+            alert(`⚠️ NO SE PUEDE ELIMINAR:\nEste registro tiene elementos hijos en la tabla [${r.child}].\n\nDebes eliminar primero los hijos vinculados.`);
+            throw new Error(`Dependencias encontradas en ${r.child}.`);
+        }
+      }
+    }
+    
+    const res = await postForm(`${entityUrl(key)}/applyEdits`, { deletes: String(oid) });
+    if (res.error) throw new Error(res.error.message || "Error en el servidor al eliminar.");
+    if (res.deleteResults && res.deleteResults.length > 0 && !res.deleteResults[0].success) throw new Error(`AGOL rechazó el borrado: ${res.deleteResults[0].error?.description || "Error"}`);
+    
+    await writeAuditEvent("DELETE", key, parentGid, "OK", "Registro eliminado exitosamente.");
+    await writeAuditHistory(key, oid, parentGid, "__DELETE__", serializeAuditRecord(row.attributes), "", "Borrado de interfaz Admin");
+
+    await loadCatalogs();
+    await loadEntity(key);
+    setStatus("Registro eliminado exitosamente.", "success");
+  } catch(e) {
+    if (!e.message.includes("Dependencias encontradas")) {
+        await writeAuditEvent("DELETE", key, parentGid, "ERROR", e.message);
+    }
+    setStatus(e.message, "error");
+  }
+};
+
+/* ===== 6. FORMULARIOS REALES ORDENADOS ===== */
+function openModalForm(oid = null) {
+  const key = currentEntityKey; 
+  editingRow = oid ? currentRows.find(x => x.attributes.OBJECTID === oid) : null;
+  
+  document.getElementById("modal-title").textContent = oid ? `Editar ${key}` : `Nuevo ${key}`;
+  document.getElementById("btn-delete").style.display = (oid && canDelete()) ? "inline-flex" : "none";
+  document.getElementById("btn-save").style.display = hasWritePermission(key) ? "inline-flex" : "none";
+  
+  let html = "", hiddenHtml = "";
+  const techFields = ["OBJECTID", "CreationDate", "Creator", "EditDate", "Editor", "PersonaUltimaEdicionID", "FechaUltimaEdicionFuncional", "PersonaID"];
+  const parentTextF = PARENT_RULES[key]?.parentText;
+  const largeTextFields = ["Definicion", "ObservacionesPlaneacion", "TextoNarrativo", "PrincipalesLogros", "DescripcionLogrosAlcanzados", "Observaciones", "DescripcionSitio"];
+
+  let sortedFields = [...metaCache[key].fields];
+  const parentFk = PARENT_RULES[key]?.fk;
+  
+  sortedFields.sort((a, b) => {
+      if (a.name === parentFk) return -1;
+      if (b.name === parentFk) return 1;
+      if (key === "SEG_Asignacion") {
+          if (a.name === "PersonaGlobalID") return -1;
+          if (b.name === "PersonaGlobalID") return 1;
+          if (a.name === "TareaGlobalID") return -1;
+          if (b.name === "TareaGlobalID") return 1;
+      }
+      return 0;
+  });
+
+  sortedFields.forEach(f => {
+    if(techFields.includes(f.name)) return;
+
+    const val = editingRow ? editingRow.attributes[f.name] : (f.name === "Vigencia" ? document.getElementById("sel-vigencia").value : "");
+    const dom = metaCache[key].domainsByField[f.name];
+    const isFK = FK_MAPPING[f.name];
+    
+    if(f.name === parentTextF || (key === "CFG_Actividad" && f.name === "Nombre")) {
+        hiddenHtml += `<input type="hidden" data-field="${f.name}" id="hidden-${f.name}" value="${esc(val)}" />`; 
+        return;
+    }
+    
+    if(f.name.includes("GlobalID") || f.name.includes("Guid")) {
+        if(isFK && catalogs[isFK]) {
+            let opts = catalogs[isFK].map(c => `<option value="${esc(c.GlobalID || c[f.name])}" ${val===(c.GlobalID || c[f.name])?'selected':''}>${esc(labelCatalog(isFK, c))}</option>`).join("");
+            html += `<div class="field"><label>${f.alias}</label><select data-field="${f.name}" data-parent="1"><option value="">- Selecciona -</option>${opts}</select></div>`;
+        }
+        return; 
+    }
+    
+    if(dom) {
+      let opts = dom.map(d => `<option value="${esc(d.code)}" ${val===d.code?'selected':''}>${esc(d.name)}</option>`).join("");
+      html += `<div class="field"><label>${f.alias}</label><select data-field="${f.name}"><option value="">- Selecciona -</option>${opts}</select></div>`;
+    } 
+    else {
+      const isWeight = PARENT_RULES[key]?.weight === f.name;
+      const type = (f.name.includes("Peso") || f.name.includes("Valor") || f.type==="esriFieldTypeDouble") ? "number" : "text";
+      if (largeTextFields.includes(f.name)) {
+          html += `<div class="field"><label>${f.alias}</label><textarea data-field="${f.name}" rows="4" spellcheck="true" lang="es">${esc(val)}</textarea></div>`;
+      } else {
+          const spellAttr = type === "text" ? 'spellcheck="true" lang="es"' : '';
+          html += `<div class="field"><label>${f.alias}</label>
+            <input type="${type}" data-field="${f.name}" value="${esc(val)}" ${isWeight?'step="0.01"':''} ${spellAttr} />
+            ${isWeight ? `<span class="weight-helper" style="font-size:11px; font-weight:bold; margin-top:4px;"></span>` : ''}
+          </div>`;
+      }
+    }
+  });
+
+  formDyn.innerHTML = `<div class="formgrid">${html}</div>${hiddenHtml}`;
+  document.getElementById("modal").classList.add("is-open");
+  
+  if(PARENT_RULES[key]) {
+    const pSel = formDyn.querySelector(`select[data-field="${PARENT_RULES[key].fk}"]`);
+    if(pSel) {
+        pSel.addEventListener("change", (e) => {
+            checkWeight(key);
+            if (parentTextF) {
+                const hInput = document.getElementById(`hidden-${parentTextF}`);
+                if(hInput) {
+                    const pEntity = PARENT_RULES[key].parent;
+                    const pObj = catalogs[pEntity]?.find(x => x.GlobalID === e.target.value);
+                    hInput.value = pObj ? (pObj[parentTextF] || "") : "";
+                }
+            }
+        });
+    }
+    formDyn.querySelectorAll(`input[data-field="${PARENT_RULES[key].weight}"]`).forEach(i => i.addEventListener("input", () => checkWeight(key)));
+    checkWeight(key);
+  }
+}
+
+// Limpiar error visual si el usuario edita el campo
+formDyn.addEventListener("input", (e) => {
+    if(e.target.classList.contains("field-error")) e.target.classList.remove("field-error");
+});
+
+async function checkWeight(key) {
+  const rule = PARENT_RULES[key]; 
+  if(!rule) return;
+  const helper = formDyn.querySelector(".weight-helper"), pSel = formDyn.querySelector(`select[data-field="${rule.fk}"]`), wInp = formDyn.querySelector(`input[data-field="${rule.weight}"]`);
+  if(!helper || !pSel || !wInp) return;
+  
+  if(!pSel.value) { 
+      helper.textContent = "Selecciona el padre primero."; 
+      helper.style.color="var(--muted)"; 
+      return; 
+  }
+  
+  const v = document.getElementById("sel-vigencia").value;
+  const w = `${rule.fk}='${pSel.value}'` + (v && metaCache[key].fieldsByName["Vigencia"] ? ` AND Vigencia=${v}` : "");
+  
+  try {
+    const r = await fetchJson(`${entityUrl(key)}/query`, { f: "json", where: w, outFields: `OBJECTID,${rule.weight}`, returnGeometry: false });
+    let sum = 0; 
+    const myOid = editingRow?.attributes?.OBJECTID;
+    (r.features || []).forEach(f => { if(f.attributes.OBJECTID !== myOid) sum += (f.attributes[rule.weight] || 0); });
+    
+    const current = Number(wInp.value) || 0; 
+    const total = sum + current;
+    helper.textContent = `Ocupado: ${sum.toFixed(2)}% | Total con este: ${total.toFixed(2)}%`;
+    helper.style.color = total > 100 ? "#d64545" : "#15803d";
+    wInp.setAttribute("data-invalid", total > 100.001 ? "1" : "0");
+  } catch(e) {}
+}
+
+/* ===== 7. GUARDADO CON VALIDACIÓN DE DUPLICADOS Y AUDITORÍA ===== */
+async function save() {
+  const key = currentEntityKey, attrs = {};
+  const isUpdate = !!editingRow;
+  const originalAttrs = isUpdate ? editingRow.attributes : null;
+
+  if(isUpdate) attrs.OBJECTID = originalAttrs.OBJECTID;
+  else attrs.GlobalID = generateGUID(); 
+  
+  if(metaCache[key].fieldsByName["PersonaUltimaEdicionID"]) attrs.PersonaUltimaEdicionID = SESSION.personaID;
+
+  formDyn.querySelectorAll("[data-field]").forEach(el => { 
+    let v = el.value; 
+    if(el.type === "number" && v !== "") v = Number(v); 
+    if(v === "") v = null;
+    attrs[el.getAttribute("data-field")] = v; 
+  });
+
+  if (PARENT_RULES[key] && !attrs[PARENT_RULES[key].fk]) {
+      throw new Error("Debe seleccionar el nivel superior (padre) antes de guardar.");
+  }
+
+  if(formDyn.querySelector("[data-invalid='1']")) throw new Error("El peso total excede el 100%.");
+
+  if(key === "CFG_Actividad") {
+      attrs["Nombre"] = attrs["NombreActividad"];
+  }
+
+  const uniqueField = UNIQUE_FIELDS[key];
+  if (uniqueField && attrs[uniqueField]) {
+      const codeVal = attrs[uniqueField];
+      const fMeta = metaCache[key].fieldsByName[uniqueField];
+      const isStr = fMeta && fMeta.type === "esriFieldTypeString";
+      
+      let dupWhere = `${uniqueField} = ${isStr ? `'${codeVal}'` : codeVal}`;
+      if (attrs.Vigencia && metaCache[key].fieldsByName["Vigencia"]) {
+          dupWhere += ` AND Vigencia = ${attrs.Vigencia}`;
+      }
+      if (isUpdate) {
+          dupWhere += ` AND OBJECTID <> ${originalAttrs.OBJECTID}`;
+      }
+      
+      const dupCheck = await fetchJson(`${entityUrl(key)}/query`, { f: "json", where: dupWhere, outFields: "OBJECTID", returnGeometry: false });
+      if (dupCheck.features && dupCheck.features.length > 0) {
+          const inputEl = formDyn.querySelector(`[data-field="${uniqueField}"]`);
+          if(inputEl) { 
+              inputEl.classList.add("field-error"); 
+              inputEl.focus(); 
+          }
+          let errMsg = `No se puede guardar: Ya existe un registro con el código '${codeVal}'`;
+          if (attrs.Vigencia) errMsg += ` para la vigencia ${attrs.Vigencia}`;
+          errMsg += ".";
+          throw new Error(errMsg);
+      }
+  }
+
+  const url = `${entityUrl(key)}/applyEdits`;
+  const p = isUpdate ? { updates: [{attributes: attrs}] } : { adds: [{attributes: attrs}] };
+  
+  try {
+      const res = await postForm(url, p);
+      if (res.error) throw new Error(res.error.message || "Error en el servidor.");
+      if (res.addResults && res.addResults.length > 0 && !res.addResults[0].success) throw new Error("Error al crear el registro.");
+      if (res.updateResults && res.updateResults.length > 0 && !res.updateResults[0].success) throw new Error("Error al actualizar el registro.");
+      
+      const resultingObjectId = isUpdate ? attrs.OBJECTID : res.addResults[0].objectId;
+      const resultingGlobalId = isUpdate ? originalAttrs.GlobalID : attrs.GlobalID;
+
+      if (isUpdate) {
+          let changes = [];
+          for(let k in attrs) {
+              if (k === "OBJECTID" || k === "GlobalID" || k === "PersonaUltimaEdicionID" || k === "Nombre") continue;
+              const oldV = originalAttrs[k] == null ? "" : originalAttrs[k];
+              const newV = attrs[k] == null ? "" : attrs[k];
+              if (String(oldV) !== String(newV)) changes.push({ campo: k, old: oldV, new: newV });
+          }
+          if (changes.length > 0) {
+              await writeAuditEvent("UPDATE", key, resultingGlobalId, "OK", `Modificados ${changes.length} campos.`);
+              for(let c of changes) await writeAuditHistory(key, resultingObjectId, resultingGlobalId, c.campo, c.old, c.new, "");
+          }
+      } else {
+          await writeAuditEvent("CREATE", key, resultingGlobalId, "OK", "Registro creado exitosamente.");
+          await writeAuditHistory(key, resultingObjectId, resultingGlobalId, "__CREATE__", "", serializeAuditRecord(attrs), "");
+      }
+
+      document.getElementById("modal").classList.remove("is-open");
+      await loadCatalogs();
+      await loadEntity(key);
+  } catch (err) {
+      await writeAuditEvent(isUpdate ? "UPDATE" : "CREATE", key, isUpdate ? originalAttrs.GlobalID : attrs.GlobalID, "ERROR", err.message);
+      throw err;
+  }
+}
+
+document.getElementById("btn-save").addEventListener("click", async () => {
+  const btn = document.getElementById("btn-save"); 
+  const originalText = btn.textContent;
+  try { 
+    btn.disabled = true; 
+    btn.textContent = "Guardando... ⏳"; 
+    setStatus("Verificando datos y enviando...", "info");
+    await save(); 
+    setStatus("Guardado con éxito.", "success"); 
+  } catch(e) { 
+    setStatus(e.message, "error"); 
+  } finally { 
+    btn.disabled = false; 
+    btn.textContent = originalText; 
+  }
+});
+
+/* ===== 8. BORRADO DESDE MODAL ===== */
+document.getElementById("btn-delete").addEventListener("click", async () => {
+  const key = currentEntityKey; 
+  if(!editingRow || !canDelete()) return;
+  if (!confirm(`¿Estás seguro de que deseas eliminar este registro de ${key}? Esta acción es irreversible.`)) return;
+
+  const btn = document.getElementById("btn-delete"); 
+  btn.disabled = true; 
+  btn.textContent = "Eliminando... ⏳";
+  setStatus("Verificando dependencias...", "info");
+  
+  const parentGid = editingRow.attributes.GlobalID;
+  const oid = editingRow.attributes.OBJECTID;
+  
+  try {
+    if(parentGid) {
+      for(let r of CHILDREN_RULES.filter(x => x.parent === key)) {
+        const check = await fetchJson(`${entityUrl(r.child)}/query`, { f: "json", where: `${r.fk}='${parentGid}'`, outFields: "OBJECTID", returnGeometry: false });
+        if(check.features?.length > 0) {
+            await writeAuditEvent("DELETE_BLOCKED", key, parentGid, "BLOCKED", `Dependencias en ${r.child}`);
+            alert(`⚠️ NO SE PUEDE ELIMINAR:\nEste registro tiene elementos hijos en la tabla [${r.child}].\n\nDebes eliminar primero los hijos vinculados.`);
+            throw new Error(`Dependencias encontradas en ${r.child}.`);
+        }
+      }
+    }
+    
+    const res = await postForm(`${entityUrl(key)}/applyEdits`, { deletes: String(oid) });
+    if(res.error) throw new Error(res.error.message || "Error al eliminar");
+    if(res.deleteResults && res.deleteResults.length > 0 && !res.deleteResults[0].success) throw new Error(`Error en servidor`);
+    
+    await writeAuditEvent("DELETE", key, parentGid, "OK", "Registro eliminado.");
+    await writeAuditHistory(key, oid, parentGid, "__DELETE__", serializeAuditRecord(editingRow.attributes), "", "");
+
+    document.getElementById("modal").classList.remove("is-open"); 
+    await loadCatalogs(); 
+    await loadEntity(key); 
+    setStatus("Registro eliminado exitosamente.", "success");
+  } catch(e) { 
+    if (!e.message.includes("Dependencias encontradas")) await writeAuditEvent("DELETE", key, parentGid, "ERROR", e.message);
+    setStatus(e.message, "error"); 
+  } finally { 
+    btn.disabled = false; 
+    btn.textContent = "Eliminar"; 
+  }
+});
+
+/* ===== EVENTOS COMPLEMENTARIOS ===== */
+document.getElementById("btn-close").addEventListener("click", () => document.getElementById("modal").classList.remove("is-open"));
+document.getElementById("btn-reload").addEventListener("click", () => loadEntity(currentEntityKey));
+document.getElementById("btn-new").addEventListener("click", () => openModalForm(null));
+document.getElementById("sel-vigencia").addEventListener("change", async () => { await loadCatalogs(); if(currentEntityKey) await loadEntity(currentEntityKey); });
+let tOut; document.getElementById("txt-search").addEventListener("input", () => { clearTimeout(tOut); tOut = setTimeout(() => loadEntity(currentEntityKey), 300); });
