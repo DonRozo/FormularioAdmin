@@ -1,7 +1,7 @@
 /* ===========================================================
    DATA-PAC | Admin OAP V3 (script.js)
-   - OTP Auth, RBAC, Sorting, Formularios Reales, Pesos, Auto-cálculo IDs
-   - UX mejorada: Textareas, Spellcheck, Alertas de Borrado, Carga visual
+   - OTP Auth, RBAC, Sorting, Formularios, Auto-cálculo IDs
+   - NUEVO: Módulo Auditoría Integral (AUD_HistorialCambio / AUD_EventoSistema)
    =========================================================== */
 
 const SERVICE_URL = "https://services6.arcgis.com/yq6pe3Lw2oWFjWtF/arcgis/rest/services/DATAPAC_V3/FeatureServer";
@@ -18,7 +18,6 @@ const ENTITY = {
 
 const HARD_READONLY = new Set(["AUD_HistorialCambio", "AUD_EventoSistema", "BI_AvanceActividad", "BI_AvanceObjetivo", "BI_AvanceProyecto", "BI_AvancePrograma", "BI_AvanceLinea", "BI_AvancePAC", "FIN_TodoGasto", "FIN_ResumenTodoGastoActividad", "REP_AvanceSubActividad", "REP_AvanceActividad", "SEG_OTP"]);
 
-// Reglas de Relaciones y Auto-cálculo
 const PARENT_RULES = {
   CFG_Linea: { fk: "PACGlobalID", parent: "CFG_PAC", weight: "Peso", parentText: "PACID" },
   CFG_Programa: { fk: "LineaGlobalID", parent: "CFG_Linea", weight: "Peso", parentText: "LineaID" },
@@ -60,17 +59,12 @@ function isReadOnly(key){ return HARD_READONLY.has(key) || !hasWritePermission(k
 function canDelete(){ return SESSION.isSuperAdmin; } 
 function generateGUID() { return '{' + crypto.randomUUID().toUpperCase() + '}'; }
 
+/* ===== FETCH & POST CORE (Caché Buster Integrado) ===== */
 async function fetchJson(url, params){
-  const u = new URL(url); 
-  Object.entries(params||{}).forEach(([k,v])=>u.searchParams.set(k,v));
-  
-  // PARCHE: Añadimos una estampa de tiempo para evitar la caché fantasma del navegador
+  const u = new URL(url); Object.entries(params||{}).forEach(([k,v])=>u.searchParams.set(k,v));
   u.searchParams.set('_ts', Date.now()); 
-  
-  // Forzamos "no-store" para que siempre consulte la base de datos real
   const r = await fetch(u.toString(), { method:"GET", cache: "no-store" }); 
-  if(!r.ok) throw new Error(`HTTP ${r.status}`); 
-  return await r.json();
+  if(!r.ok) throw new Error(`HTTP ${r.status}`); return await r.json();
 }
 async function postForm(url, obj){
   const form = new URLSearchParams(); form.append("f", "json");
@@ -79,6 +73,42 @@ async function postForm(url, obj){
   if(obj.deletes) form.append("deletes", obj.deletes);
   const r = await fetch(url, { method:"POST", headers:{ "Content-Type":"application/x-www-form-urlencoded" }, body: form });
   return await r.json();
+}
+
+/* ===========================================================
+   MÓDULO DE AUDITORÍA (NUEVO)
+   =========================================================== */
+function serializeAuditRecord(attrs) {
+  const clean = { ...attrs };
+  // Limpiar campos técnicos gigantes o inútiles para la historia
+  delete clean.Shape; delete clean.CreationDate; delete clean.Creator; delete clean.EditDate; delete clean.Editor;
+  const str = JSON.stringify(clean);
+  return str.length > 1000 ? str.substring(0, 997) + "..." : str; // Truncar si excede el varchar nativo
+}
+
+async function writeAuditEvent(tipo, entidad, objGid, resultado, detalle) {
+  if (!SESSION.personaID) return;
+  try {
+    const attrs = {
+      GlobalID: generateGUID(), TipoEvento: tipo, Entidad: entidad, ObjetoGlobalID: objGid || "",
+      Resultado: resultado, DetalleEvento: detalle ? detalle.substring(0, 255) : "",
+      PersonaID: SESSION.personaID, FechaEvento: Date.now()
+    };
+    await postForm(`${entityUrl("AUD_EventoSistema")}/applyEdits`, { adds: [{attributes: attrs}] });
+  } catch(e) { console.warn("⚠️ Fallo no bloqueante en AUD_EventoSistema:", e); }
+}
+
+async function writeAuditHistory(tipoObj, objId, objGid, campo, valAnt, valNuevo, motivo) {
+  if (!SESSION.personaID) return;
+  try {
+    const attrs = {
+      GlobalID: generateGUID(), TipoObjeto: tipoObj, ObjetoID: objId || 0, ObjetoGlobalID: objGid || "",
+      CampoModificado: campo || "", ValorAnterior: valAnt ? String(valAnt).substring(0, 1000) : "",
+      ValorNuevo: valNuevo ? String(valNuevo).substring(0, 1000) : "",
+      PersonaID: SESSION.personaID, FechaCambio: Date.now(), MotivoCambio: motivo || "", OrigenCambio: "APP_ADMIN"
+    };
+    await postForm(`${entityUrl("AUD_HistorialCambio")}/applyEdits`, { adds: [{attributes: attrs}] });
+  } catch(e) { console.warn("⚠️ Fallo no bloqueante en AUD_HistorialCambio:", e); }
 }
 
 /* ===========================================================
@@ -107,6 +137,10 @@ document.getElementById("btn-verify-otp").addEventListener("click", async () => 
     const res = await fetchJson(entityUrl("SEG_OTP")+"/query", { f:"json", where:`PersonaGlobalID='${SESSION.personaGlobalID}' AND CodigoHash='${code}' AND Usado='NO'`, outFields:"OBJECTID", returnGeometry:false });
     if(!res.features?.length) throw new Error("Código incorrecto.");
     await postForm(entityUrl("SEG_OTP")+"/applyEdits", { updates:[{attributes:{OBJECTID: res.features[0].attributes.OBJECTID, Usado:'SI'}}] });
+    
+    // AUDITORÍA DE INGRESO
+    await writeAuditEvent("OTP_VALIDATE", "SEG_Persona", SESSION.personaGlobalID, "OK", "Ingreso exitoso al panel Admin");
+    
     await initSession();
   } catch(e) { setStatus(e.message, "error", true); }
 });
@@ -116,7 +150,7 @@ document.getElementById("btn-back-otp").addEventListener("click", () => {
 });
 
 /* ===========================================================
-   2. CARGA DE SESIÓN, ROLES Y CATÁLOGOS
+   2. CARGA DE SESIÓN Y CATÁLOGOS
    =========================================================== */
 async function initSession() {
   setStatus("Cargando perfil...", "info", true);
@@ -231,7 +265,7 @@ function buildWhere(key) {
   return w;
 }
 
-/* ===== 4. TABLA CON ORDENAMIENTO Y LIMPIEZA DE METADATOS ===== */
+/* ===== 4. TABLA CON ORDENAMIENTO ===== */
 async function getMeta(key){
   if(metaCache[key]) return metaCache[key];
   const m = await fetchJson(`${entityUrl(key)}?f=pjson`);
@@ -258,13 +292,10 @@ window.toggleSort = function(col) {
 
 function renderTable() {
   const key = currentEntityKey, canWrite = hasWritePermission(key), canDel = canDelete();
-  
-  // Ocultar campos de sistema en la tabla
   const techFields = ["CreationDate", "Creator", "EditDate", "Editor", "PersonaUltimaEdicionID", "FechaUltimaEdicionFuncional", "PersonaID"];
   
   let fields = metaCache[key].fields.filter(f => 
-    f.name === "OBJECTID" || 
-    (!f.name.includes("GlobalID") && !f.name.includes("Guid") && !techFields.includes(f.name) && f.name !== "IndicadorID")
+    f.name === "OBJECTID" || (!f.name.includes("GlobalID") && !f.name.includes("Guid") && !techFields.includes(f.name) && f.name !== "IndicadorID")
   );
   
   let sortedRows = [...currentRows];
@@ -297,62 +328,59 @@ function renderTable() {
   }).join("");
 }
 
-// NUEVA FUNCIÓN: Alerta y borrado desde la tabla
+/* ===== 5. BORRADO CON REGLAS Y AUDITORÍA (TABLA) ===== */
 window.confirmDelete = async function(oid) {
   const key = currentEntityKey;
   if (!canDelete()) return;
-  
   const row = currentRows.find(x => x.attributes.OBJECTID === oid);
   if (!row) return;
 
-  if (!confirm(`¿Estás seguro de que deseas eliminar este registro de ${key}? Esta acción es irreversible.`)) {
-    return;
-  }
+  if (!confirm(`¿Estás seguro de que deseas eliminar este registro de ${key}? Esta acción es irreversible.`)) return;
 
   setStatus("Verificando dependencias...", "info");
+  const parentGid = row.attributes.GlobalID;
+
   try {
-    const parentGid = row.attributes.GlobalID;
     if (parentGid) {
       for (let r of CHILDREN_RULES.filter(x => x.parent === key)) {
         const check = await fetchJson(`${entityUrl(r.child)}/query`, { f:"json", where:`${r.fk}='${parentGid}'`, outFields:"OBJECTID", returnGeometry:false });
         if (check.features?.length > 0) {
+            await writeAuditEvent("DELETE_BLOCKED", key, parentGid, "BLOCKED", `Dependencias en ${r.child}`);
             alert(`⚠️ NO SE PUEDE ELIMINAR:\nEste registro tiene elementos hijos en la tabla [${r.child}].\n\nDebes eliminar primero los hijos vinculados.`);
             throw new Error(`Dependencias encontradas en ${r.child}.`);
         }
       }
     }
     
-    // Si no hay hijos, proceder a borrar
     const res = await postForm(`${entityUrl(key)}/applyEdits`, { deletes: String(oid) });
-    
-    // Validación estricta del borrado en ArcGIS
     if (res.error) throw new Error(res.error.message || "Error en el servidor al eliminar.");
-    if (res.deleteResults && res.deleteResults.length > 0 && !res.deleteResults[0].success) {
-      throw new Error(`AGOL rechazó el borrado: ${res.deleteResults[0].error?.description || "Error desconocido"}`);
-    }
+    if (res.deleteResults && res.deleteResults.length > 0 && !res.deleteResults[0].success) throw new Error(`AGOL rechazó el borrado: ${res.deleteResults[0].error?.description || "Error"}`);
     
+    // AUDITORÍA DELETE ÉXITO
+    await writeAuditEvent("DELETE", key, parentGid, "OK", "Registro eliminado exitosamente.");
+    await writeAuditHistory(key, oid, parentGid, "__DELETE__", serializeAuditRecord(row.attributes), "", "Borrado de interfaz Admin");
+
     await loadCatalogs();
     await loadEntity(key);
     setStatus("Registro eliminado exitosamente.", "success");
   } catch(e) {
+    if (!e.message.includes("Dependencias encontradas")) {
+        await writeAuditEvent("DELETE", key, parentGid, "ERROR", e.message);
+    }
     setStatus(e.message, "error");
   }
 };
 
-/* ===== 5. FORMULARIOS REALES CON AUTO-CÁLCULO Y ORTOGRAFÍA ===== */
+/* ===== 6. FORMULARIOS REALES ===== */
 function openModalForm(oid = null) {
   const key = currentEntityKey; editingRow = oid ? currentRows.find(x => x.attributes.OBJECTID === oid) : null;
   document.getElementById("modal-title").textContent = oid ? `Editar ${key}` : `Nuevo ${key}`;
   document.getElementById("btn-delete").style.display = (oid && canDelete()) ? "inline-flex" : "none";
   document.getElementById("btn-save").style.display = hasWritePermission(key) ? "inline-flex" : "none";
   
-  let html = "";
-  let hiddenHtml = "";
-
+  let html = "", hiddenHtml = "";
   const techFields = ["OBJECTID", "CreationDate", "Creator", "EditDate", "Editor", "PersonaUltimaEdicionID", "FechaUltimaEdicionFuncional", "PersonaID"];
   const parentTextF = PARENT_RULES[key]?.parentText;
-  
-  // Campos que necesitan ser grandes para escribir mucho texto
   const largeTextFields = ["Definicion", "ObservacionesPlaneacion", "TextoNarrativo", "PrincipalesLogros", "DescripcionLogrosAlcanzados", "Observaciones", "DescripcionSitio"];
 
   metaCache[key].fields.forEach(f => {
@@ -363,10 +391,8 @@ function openModalForm(oid = null) {
     const isFK = FK_MAPPING[f.name];
     
     if(f.name === parentTextF) {
-        hiddenHtml += `<input type="hidden" data-field="${f.name}" id="hidden-${f.name}" value="${esc(val)}" />`;
-        return;
+        hiddenHtml += `<input type="hidden" data-field="${f.name}" id="hidden-${f.name}" value="${esc(val)}" />`; return;
     }
-
     if(f.name.includes("GlobalID") || f.name.includes("Guid")) {
         if(isFK && catalogs[isFK]) {
             let opts = catalogs[isFK].map(c => `<option value="${esc(c.GlobalID || c[f.name])}" ${val===(c.GlobalID || c[f.name])?'selected':''}>${esc(labelCatalog(isFK, c))}</option>`).join("");
@@ -374,7 +400,6 @@ function openModalForm(oid = null) {
         }
         return; 
     }
-
     if(dom) {
       let opts = dom.map(d => `<option value="${esc(d.code)}" ${val===d.code?'selected':''}>${esc(d.name)}</option>`).join("");
       html += `<div class="field"><label>${f.alias}</label><select data-field="${f.name}"><option value="">- Selecciona -</option>${opts}</select></div>`;
@@ -382,13 +407,10 @@ function openModalForm(oid = null) {
     else {
       const isWeight = PARENT_RULES[key]?.weight === f.name;
       const type = (f.name.includes("Peso") || f.name.includes("Valor") || f.type==="esriFieldTypeDouble") ? "number" : "text";
-      
       if (largeTextFields.includes(f.name)) {
-          html += `<div class="field"><label>${f.alias}</label>
-            <textarea data-field="${f.name}" rows=\"4\" spellcheck=\"true\" lang=\"es\">${esc(val)}</textarea>
-          </div>`;
+          html += `<div class="field"><label>${f.alias}</label><textarea data-field="${f.name}" rows="4" spellcheck="true" lang="es">${esc(val)}</textarea></div>`;
       } else {
-          const spellAttr = type === "text" ? 'spellcheck=\"true\" lang=\"es\"' : '';
+          const spellAttr = type === "text" ? 'spellcheck="true" lang="es"' : '';
           html += `<div class="field"><label>${f.alias}</label>
             <input type="${type}" data-field="${f.name}" value="${esc(val)}" ${isWeight?'step="0.01"':''} ${spellAttr} />
             ${isWeight ? `<span class="weight-helper" style="font-size:11px; font-weight:bold; margin-top:4px;"></span>` : ''}
@@ -439,9 +461,13 @@ async function checkWeight(key) {
   } catch(e) {}
 }
 
+/* ===== 7. GUARDADO Y AUDITORÍA CREATE/UPDATE ===== */
 async function save() {
   const key = currentEntityKey, attrs = {};
-  if(editingRow) attrs.OBJECTID = editingRow.attributes.OBJECTID;
+  const isUpdate = !!editingRow;
+  const originalAttrs = isUpdate ? editingRow.attributes : null;
+
+  if(isUpdate) attrs.OBJECTID = originalAttrs.OBJECTID;
   else attrs.GlobalID = generateGUID(); 
   
   if(metaCache[key].fieldsByName["PersonaUltimaEdicionID"]) attrs.PersonaUltimaEdicionID = SESSION.personaID;
@@ -454,78 +480,97 @@ async function save() {
   if(formDyn.querySelector("[data-invalid='1']")) throw new Error("El peso total excede el 100%.");
 
   const url = `${entityUrl(key)}/applyEdits`;
-  const p = editingRow ? { updates: [{attributes:attrs}] } : { adds: [{attributes:attrs}] };
-  const res = await postForm(url, p);
+  const p = isUpdate ? { updates: [{attributes:attrs}] } : { adds: [{attributes:attrs}] };
   
-  // Validación segura de la respuesta de ArcGIS
-  if (res.error) throw new Error(res.error.message || "Error en el servidor.");
-  if (res.addResults && res.addResults.length > 0 && !res.addResults[0].success) throw new Error("Error al crear el registro.");
-  if (res.updateResults && res.updateResults.length > 0 && !res.updateResults[0].success) throw new Error("Error al actualizar el registro.");
-  
-  document.getElementById("modal").classList.remove("is-open");
-  await loadCatalogs();
-  await loadEntity(key);
+  try {
+      const res = await postForm(url, p);
+      if (res.error) throw new Error(res.error.message || "Error en el servidor.");
+      if (res.addResults && res.addResults.length > 0 && !res.addResults[0].success) throw new Error("Error al crear el registro.");
+      if (res.updateResults && res.updateResults.length > 0 && !res.updateResults[0].success) throw new Error("Error al actualizar el registro.");
+      
+      // EXTRACCIÓN DE IDS PARA AUDITORÍA
+      const resultingObjectId = isUpdate ? attrs.OBJECTID : res.addResults[0].objectId;
+      const resultingGlobalId = isUpdate ? originalAttrs.GlobalID : attrs.GlobalID;
+
+      // AUDITORÍA EXITOSA (Fire and Forget)
+      if (isUpdate) {
+          let changes = [];
+          for(let k in attrs) {
+              if (k === "OBJECTID" || k === "GlobalID" || k === "PersonaUltimaEdicionID") continue;
+              const oldV = originalAttrs[k] == null ? "" : originalAttrs[k];
+              const newV = attrs[k] == null ? "" : attrs[k];
+              if (String(oldV) !== String(newV)) {
+                  changes.push({ campo: k, old: oldV, new: newV });
+              }
+          }
+          if (changes.length > 0) {
+              await writeAuditEvent("UPDATE", key, resultingGlobalId, "OK", `Modificados ${changes.length} campos.`);
+              for(let c of changes) {
+                  await writeAuditHistory(key, resultingObjectId, resultingGlobalId, c.campo, c.old, c.new, "");
+              }
+          }
+      } else {
+          await writeAuditEvent("CREATE", key, resultingGlobalId, "OK", "Registro creado exitosamente.");
+          await writeAuditHistory(key, resultingObjectId, resultingGlobalId, "__CREATE__", "", serializeAuditRecord(attrs), "");
+      }
+
+      document.getElementById("modal").classList.remove("is-open");
+      await loadCatalogs();
+      await loadEntity(key);
+  } catch (err) {
+      // AUDITORÍA DE ERROR
+      await writeAuditEvent(isUpdate ? "UPDATE" : "CREATE", key, isUpdate ? originalAttrs.GlobalID : attrs.GlobalID, "ERROR", err.message);
+      throw err;
+  }
 }
 
 document.getElementById("btn-save").addEventListener("click", async () => {
-  const btn = document.getElementById("btn-save"); 
-  const originalText = btn.textContent;
+  const btn = document.getElementById("btn-save"); const originalText = btn.textContent;
   try { 
-    btn.disabled = true; 
-    btn.textContent = "Guardando... ⏳"; 
-    setStatus("Enviando datos al servidor...", "info");
-    await save(); 
-    setStatus("Guardado con éxito.", "success"); 
-  } catch(e) { 
-    setStatus(e.message, "error"); 
-  } finally { 
-    btn.disabled = false; 
-    btn.textContent = originalText;
-  }
+    btn.disabled = true; btn.textContent = "Guardando... ⏳"; setStatus("Enviando datos al servidor...", "info");
+    await save(); setStatus("Guardado con éxito.", "success"); 
+  } catch(e) { setStatus(e.message, "error"); } finally { btn.disabled = false; btn.textContent = originalText; }
 });
 
-/* ===== 6. BORRADO CON REGLAS DESDE EL MODAL ===== */
+/* ===== 8. BORRADO DESDE MODAL ===== */
 document.getElementById("btn-delete").addEventListener("click", async () => {
-  const key = currentEntityKey; 
-  if(!editingRow || !canDelete()) return;
-  
-  if (!confirm(`¿Estás seguro de que deseas eliminar este registro de ${key}? Esta acción es irreversible.`)) {
-    return;
-  }
+  const key = currentEntityKey; if(!editingRow || !canDelete()) return;
+  if (!confirm(`¿Estás seguro de que deseas eliminar este registro de ${key}? Esta acción es irreversible.`)) return;
 
-  const btn = document.getElementById("btn-delete"); 
-  btn.disabled = true;
-  btn.textContent = "Eliminando... ⏳";
+  const btn = document.getElementById("btn-delete"); btn.disabled = true; btn.textContent = "Eliminando... ⏳";
   setStatus("Verificando dependencias...", "info");
+  const parentGid = editingRow.attributes.GlobalID;
+  const oid = editingRow.attributes.OBJECTID;
   
   try {
-    const parentGid = editingRow.attributes.GlobalID;
     if(parentGid) {
       for(let r of CHILDREN_RULES.filter(x => x.parent === key)) {
         const check = await fetchJson(`${entityUrl(r.child)}/query`, { f:"json", where:`${r.fk}='${parentGid}'`, outFields:"OBJECTID", returnGeometry:false });
         if(check.features?.length > 0) {
+            await writeAuditEvent("DELETE_BLOCKED", key, parentGid, "BLOCKED", `Dependencias en ${r.child}`);
             alert(`⚠️ NO SE PUEDE ELIMINAR:\nEste registro tiene elementos hijos en la tabla [${r.child}].\n\nDebes eliminar primero los hijos vinculados.`);
             throw new Error(`Dependencias encontradas en ${r.child}.`);
         }
       }
     }
     
-    const res = await postForm(`${entityUrl(key)}/applyEdits`, { deletes: String(editingRow.attributes.OBJECTID) });
-    if(res.deleteResults && res.deleteResults.length > 0 && !res.deleteResults[0].success) throw new Error("Error en el servidor al eliminar.");
+    const res = await postForm(`${entityUrl(key)}/applyEdits`, { deletes: String(oid) });
+    if(res.error) throw new Error(res.error.message || "Error al eliminar");
+    if(res.deleteResults && res.deleteResults.length > 0 && !res.deleteResults[0].success) throw new Error(`Error en servidor`);
     
+    // AUDITORÍA EXITOSA
+    await writeAuditEvent("DELETE", key, parentGid, "OK", "Registro eliminado.");
+    await writeAuditHistory(key, oid, parentGid, "__DELETE__", serializeAuditRecord(editingRow.attributes), "", "");
+
     document.getElementById("modal").classList.remove("is-open"); 
-    await loadCatalogs();
-    await loadEntity(key); 
-    setStatus("Registro eliminado exitosamente.", "success");
+    await loadCatalogs(); await loadEntity(key); setStatus("Registro eliminado exitosamente.", "success");
   } catch(e) { 
+    if (!e.message.includes("Dependencias encontradas")) await writeAuditEvent("DELETE", key, parentGid, "ERROR", e.message);
     setStatus(e.message, "error"); 
-  } finally { 
-    btn.disabled = false;
-    btn.textContent = "Eliminar";
-  }
+  } finally { btn.disabled = false; btn.textContent = "Eliminar"; }
 });
 
-/* ===== 7. EVENTOS GENERALES ===== */
+/* ===== EVENTOS COMPLEMENTARIOS ===== */
 document.getElementById("btn-close").addEventListener("click", () => document.getElementById("modal").classList.remove("is-open"));
 document.getElementById("btn-reload").addEventListener("click", () => loadEntity(currentEntityKey));
 document.getElementById("btn-new").addEventListener("click", () => openModalForm(null));
