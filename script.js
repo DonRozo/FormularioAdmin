@@ -32,7 +32,8 @@ const FK_MAPPING = {
   PACGlobalID: "CFG_PAC", LineaGlobalID: "CFG_Linea", ProgramaGlobalID: "CFG_Programa",
   ProyectoGlobalID: "CFG_Proyecto", ObjetivoGlobalID: "CFG_Objetivo", ActividadGlobalID: "CFG_Actividad",
   SubActividadGlobalID: "CFG_SubActividad", TareaGlobalID: "CFG_Tarea", PersonaGlobalID: "SEG_Persona",
-  RolID: "SEG_Rol", ResponsableGlobalID: "SEG_Persona", PersonaID: "SEG_Persona"
+  ResponsableGlobalID: "SEG_Persona", PersonaID: "SEG_Persona" 
+  // Nota: RolID se procesa ahora de forma específica en openModalForm y renderTable
 };
 
 const CHILDREN_RULES = [
@@ -210,7 +211,9 @@ async function initSession() {
     document.getElementById("pill-user").textContent = `Usuario: ${SESSION.nombre} (${SESSION.roles.join(", ")})`;
     
     const btnClone = document.getElementById("btn-open-clone");
-    if (btnClone) btnClone.style.display = SESSION.isSuperAdmin ? "inline-flex" : "none";
+    if (btnClone) {
+        btnClone.style.display = SESSION.isSuperAdmin ? "inline-flex" : "none";
+    }
     
     buildDynamicMenu();
   } catch(e) { setStatus(e.message, "error", true); }
@@ -264,7 +267,7 @@ function buildEntityLabel(entityKey, item) {
             if (item.Nombre && item.Correo) return `${item.Nombre} — ${item.Correo}`;
             if (item.PersonaID && item.Nombre) return `${item.PersonaID} — ${item.Nombre}`;
             return item.Nombre || item.GlobalID || "(sin etiqueta)";
-        case "SEG_Rol": return item.NombreRol || item.RolID; // Mostrar siempre NombreRol
+        case "SEG_Rol": return item.NombreRol || item.RolID; 
         default: return item.GlobalID || "(sin etiqueta)";
     }
 }
@@ -287,7 +290,7 @@ async function loadCatalogs(forceBase = false) {
   await fetchCat("CFG_Programa", "Nombre", ",ProgramaID,LineaGlobalID"); await fetchCat("CFG_Proyecto", "Nombre", ",ProyectoID,ProgramaGlobalID");
   await fetchCat("CFG_Objetivo", "Nombre", ",ObjetivoID,ProyectoGlobalID"); await fetchCat("CFG_Actividad", "NombreActividad", ",ActividadID,Nombre,ObjetivoGlobalID");
   await fetchCat("CFG_SubActividad", "NombreSubActividad", ",CodigoSubActividad,ActividadGlobalID"); await fetchCat("CFG_Tarea", "NombreTarea", ",CodigoTarea,SubActividadGlobalID");
-  await fetchCat("SEG_Persona", "Nombre", ",Cedula,Correo,PersonaID"); await fetchCat("SEG_Rol", "NombreRol", ",RolID,Orden");
+  await fetchCat("SEG_Persona", "Nombre", ",Cedula,Correo,PersonaID"); await fetchCat("SEG_Rol", "NombreRol", ",RolID,Orden,Descripcion");
 
   if (forceBase) {
       const selPac = document.getElementById("sel-pac");
@@ -447,7 +450,9 @@ async function loadEntity(key, clearSearch = false) {
   currentEntityKey = key; 
   document.querySelectorAll(".navitem").forEach(b => { 
       const titleEl = b.querySelector('.navitem__title');
-      if(titleEl) b.classList.toggle("is-active", titleEl.textContent === key); 
+      if(titleEl) {
+          b.classList.toggle("is-active", titleEl.textContent === key); 
+      }
   });
   
   const isCfg = key.startsWith("CFG_");
@@ -554,8 +559,13 @@ function renderTable() {
           const tar = catalogs["CFG_Tarea"]?.find(t => t.GlobalID === tGid);
           displayVal = tar ? `${tar.CodigoTarea||''} - ${tar.NombreTarea||''}` : tGid;
       } else if (f.name === "RolID") {
-          const rol = catalogs["SEG_Rol"]?.find(x => String(x.RolID) === String(rawVal));
-          if (rol) displayVal = rol.NombreRol || rawVal;
+          const rawStr = String(rawVal).trim().toLowerCase();
+          const rol = catalogs["SEG_Rol"]?.find(x => 
+              String(x.RolID).trim().toLowerCase() === rawStr || 
+              (x.NombreRol && x.NombreRol.trim().toLowerCase() === rawStr) || 
+              (x.Descripcion && x.Descripcion.trim().toLowerCase() === rawStr)
+          );
+          displayVal = rol ? rol.NombreRol : rawVal;
       } else if (f.name === "_Objeto_Virtual" && key === "SEG_Alcance") {
           const nivel = r.attributes.NivelJerarquia;
           const objGid = r.attributes.ObjetoGlobalID || r.attributes.ObjetoID;
@@ -710,6 +720,41 @@ function openModalForm(oid = null, isDuplicate = false) {
         }
     }
     
+    // Tratamiento especial exhaustivo para RolID (Selector y auto-resolución legacy)
+    if (f.name === "RolID") {
+        let currentRolVal = val;
+        let oldRolHint = "";
+        
+        if (editingRow && currentRolVal) {
+            const rawStr = String(currentRolVal).trim().toLowerCase();
+            let matchedRol = catalogs["SEG_Rol"]?.find(r => String(r.RolID).trim().toLowerCase() === rawStr);
+            
+            if (!matchedRol) {
+                matchedRol = catalogs["SEG_Rol"]?.find(r => 
+                    (r.NombreRol && r.NombreRol.trim().toLowerCase() === rawStr) ||
+                    (r.Descripcion && r.Descripcion.trim().toLowerCase() === rawStr)
+                );
+                if (matchedRol) {
+                    currentRolVal = matchedRol.RolID; 
+                } else {
+                    oldRolHint = `(Antiguo: ${esc(currentRolVal)})`;
+                    currentRolVal = ""; 
+                }
+            }
+        }
+
+        let opts = (catalogs["SEG_Rol"] || []).map(c => `<option value="${esc(c.RolID)}" ${String(currentRolVal) === String(c.RolID) ? 'selected' : ''}>${esc(c.NombreRol)}</option>`).join("");
+        html += `<div class="field" id="field-wrap-${f.name}">
+                    <label>${f.alias} <span style="color:#d64545">*</span></label>
+                    <select data-field="${f.name}" data-type="${f.type}" id="sel-${f.name}">
+                        <option value="">- Seleccione Rol -</option>
+                        ${opts}
+                    </select>
+                    ${oldRolHint ? `<span class="help-text" style="color:#d64545;">El valor actual (${esc(val)}) no corresponde a un rol válido del catálogo. Seleccione uno.</span>` : ''}
+                 </div>`;
+        return;
+    }
+
     if (key === "SEG_Asignacion" && f.name === "TareaGlobalID") {
         let actOpts = `<option value="">- Seleccione Actividad -</option>`;
         catalogs["CFG_Actividad"]?.forEach(a => { actOpts += `<option value="${a.GlobalID}">${buildEntityLabel("CFG_Actividad", a)}</option>`; });
@@ -723,9 +768,8 @@ function openModalForm(oid = null, isDuplicate = false) {
         return;
     }
 
-    if(f.name.includes("GlobalID") || f.name.includes("Guid") || f.name === "RolID" || (key === "SEG_PersonaRol" && f.name === "PersonaID")) {
+    if(f.name.includes("GlobalID") || f.name.includes("Guid") || (key === "SEG_PersonaRol" && f.name === "PersonaID")) {
         let lookupKey = isFK || f.name.replace("GlobalID","");
-        if(f.name === "RolID") lookupKey = "SEG_Rol";
         if(key === "SEG_PersonaRol" && f.name === "PersonaID") lookupKey = "SEG_Persona";
         
         if(lookupKey && catalogs[lookupKey]) {
@@ -883,7 +927,7 @@ async function checkWeight(key) {
   } catch(e) {}
 }
 
-/* ===== 7. GUARDADO CON VALIDACIONES Y DUPLICADOS ===== */
+/* ===== 7. GUARDADO CON VALIDACIONES (TOPES Y DUPLICADOS) ===== */
 async function save() {
   const errDiv = document.getElementById("form-error");
   if(errDiv) errDiv.style.display = "none";
