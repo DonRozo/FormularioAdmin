@@ -1,7 +1,7 @@
 /* ===========================================================
    DATA-PAC | Admin OAP V3 (script.js)
-   - OTP Auth, RBAC, Auditoría, Personas Genéricas, Duplicar
-   - MEJORA: Aislamiento CFG_*, Contexto PAC, y Consultas POST robustas
+   - OTP Auth, RBAC, Personas Genéricas, PAC Context
+   - MEJORA: Refactorización funcional de módulo de seguridad (SEG_*)
    =========================================================== */
 
 const SERVICE_URL = "https://services6.arcgis.com/yq6pe3Lw2oWFjWtF/arcgis/rest/services/DATAPAC_V3/FeatureServer";
@@ -32,7 +32,7 @@ const FK_MAPPING = {
   PACGlobalID: "CFG_PAC", LineaGlobalID: "CFG_Linea", ProgramaGlobalID: "CFG_Programa",
   ProyectoGlobalID: "CFG_Proyecto", ObjetivoGlobalID: "CFG_Objetivo", ActividadGlobalID: "CFG_Actividad",
   SubActividadGlobalID: "CFG_SubActividad", TareaGlobalID: "CFG_Tarea", PersonaGlobalID: "SEG_Persona",
-  RolID: "SEG_Rol", ResponsableGlobalID: "SEG_Persona"
+  RolID: "SEG_Rol", ResponsableGlobalID: "SEG_Persona", PersonaID: "SEG_Persona"
 };
 
 const CHILDREN_RULES = [
@@ -45,7 +45,8 @@ const CHILDREN_RULES = [
 
 const UNIQUE_FIELDS = {
   CFG_PAC: "PACID", CFG_Linea: "LineaID", CFG_Programa: "ProgramaID", CFG_Proyecto: "ProyectoID",
-  CFG_Objetivo: "ObjetivoID", CFG_Actividad: "ActividadID", CFG_SubActividad: "CodigoSubActividad", CFG_Tarea: "CodigoTarea"
+  CFG_Objetivo: "ObjetivoID", CFG_Actividad: "ActividadID", CFG_SubActividad: "CodigoSubActividad", CFG_Tarea: "CodigoTarea",
+  SEG_Asignacion: "ClaveUnicaAsignacion"
 };
 
 const PERSON_FIELDS_CONFIG = {
@@ -61,8 +62,9 @@ const SEARCH_FIELDS = {
   CFG_Tarea: ["CodigoTarea", "NombreTarea"],
   PLAN_SubActividadVigencia: ["UnidadMedida", "SiglaVariable"],
   PLAN_TareaVigencia: ["UnidadMedida", "ObservacionReglaAvance"],
-  SEG_Persona: ["PersonaID", "Nombre", "Cedula", "Correo"],
-  SEG_Rol: ["RolID", "NombreRol"], SEG_Asignacion: ["Estado"],
+  SEG_Persona: ["PersonaID", "Nombre", "Cedula", "Correo", "Dependencia", "RolPrincipal"],
+  SEG_Rol: ["RolID", "NombreRol"], SEG_Asignacion: ["ClaveUnicaAsignacion", "Estado"],
+  SEG_OTP: ["Correo", "Usado", "IP"],
   REP_AvanceTarea: ["Responsable", "Observaciones", "Periodo", "MotivoAjuste"],
   REP_ReporteNarrativo: ["Responsable", "TextoNarrativo", "PrincipalesLogros", "DescripcionLogrosAlcanzados"],
   AUD_HistorialCambio: ["TipoObjeto", "ObjetoGlobalID", "CampoModificado", "ValorAnterior", "ValorNuevo", "MotivoCambio", "OrigenCambio"],
@@ -88,7 +90,7 @@ function isReadOnly(key){ return HARD_READONLY.has(key) || !hasWritePermission(k
 function canDelete(){ return SESSION.isSuperAdmin; } 
 function generateGUID() { return '{' + crypto.randomUUID().toUpperCase() + '}'; }
 
-/* ===== FETCH & POST CORE (Estrategia POST para evitar Error 414 URI Too Long) ===== */
+/* ===== FETCH & POST CORE ===== */
 async function fetchJson(url, params){
   params = params || {};
   params._ts = Date.now();
@@ -269,15 +271,15 @@ function buildEntityLabel(entityKey, item) {
 }
 
 async function loadCatalogs(forceBase = false) {
-  const vig = document.getElementById("sel-vigencia").value; 
-  const vigW = vig ? `Vigencia=${vig}` : "1=1";
-  
+  const vig = document.getElementById("sel-vigencia").value; const vigW = vig ? `Vigencia=${vig}` : "1=1";
   async function fetchCat(k, nameF, extra=""){
     const isStruct = k.startsWith("CFG_") || k.startsWith("SEG_");
     if (!forceBase && isStruct && catalogs[k] && catalogs[k].length > 0) return; 
     
     const w = (!isStruct && metaCache[k]?.fieldsByName?.["Vigencia"]) ? vigW : "1=1";
-    const r = await fetchJson(`${entityUrl(k)}/query`, { f: "json", where: w, outFields: `GlobalID,${nameF}${extra}`, orderByFields: `${nameF} ASC`, returnGeometry: false });
+    // Si es SEG_Rol, ordenarlo por el campo Orden
+    const orderClause = (k === "SEG_Rol") ? "Orden ASC" : `${nameF} ASC`;
+    const r = await fetchJson(`${entityUrl(k)}/query`, { f: "json", where: w, outFields: `GlobalID,${nameF}${extra}`, orderByFields: orderClause, returnGeometry: false });
     catalogs[k] = (r.features || []).map(f => f.attributes);
   }
   
@@ -287,7 +289,7 @@ async function loadCatalogs(forceBase = false) {
   await fetchCat("CFG_Programa", "Nombre", ",ProgramaID,LineaGlobalID"); await fetchCat("CFG_Proyecto", "Nombre", ",ProyectoID,ProgramaGlobalID");
   await fetchCat("CFG_Objetivo", "Nombre", ",ObjetivoID,ProyectoGlobalID"); await fetchCat("CFG_Actividad", "NombreActividad", ",ActividadID,Nombre,ObjetivoGlobalID");
   await fetchCat("CFG_SubActividad", "NombreSubActividad", ",CodigoSubActividad,ActividadGlobalID"); await fetchCat("CFG_Tarea", "NombreTarea", ",CodigoTarea,SubActividadGlobalID");
-  await fetchCat("SEG_Persona", "Nombre", ",Cedula,Correo,PersonaID"); await fetchCat("SEG_Rol", "NombreRol", ",RolID");
+  await fetchCat("SEG_Persona", "Nombre", ",Cedula,Correo,PersonaID"); await fetchCat("SEG_Rol", "NombreRol", ",RolID,Orden");
 
   if (forceBase) {
       const selPac = document.getElementById("sel-pac");
@@ -377,7 +379,6 @@ function getPacWhere(entityKey, pacGid) {
 
 function buildSecurityWhere(key) {
   let w = "1=1";
-  
   const isCfg = key.startsWith("CFG_") || key.startsWith("SEG_");
   const isPlanOrRep = key.startsWith("PLAN_") || key.startsWith("REP_") || key.startsWith("FIN_") || key.startsWith("BI_") || key.startsWith("WF_");
   
@@ -432,7 +433,7 @@ function buildWhere(key) {
   return `${securityW} AND (${clauses.join(" OR ")})`;
 }
 
-/* ===== 4. TABLA CON ORDENAMIENTO Y ACCIÓN DUPLICAR ===== */
+/* ===== 4. TABLA (Nombres Amigables SEG_*) ===== */
 async function getMeta(key){
   if(metaCache[key]) return metaCache[key];
   const m = await fetchJson(`${entityUrl(key)}?f=pjson`);
@@ -463,7 +464,6 @@ async function loadEntity(key, clearSearch = false) {
 
   try {
       await getMeta(key);
-      
       const r = await fetchJson(`${entityUrl(key)}/query`, { f: "json", where: buildWhere(key), outFields: "*", returnGeometry: false });
       currentRows = r.features || []; 
       currentSort = { col: null, dir: 0 };
@@ -491,13 +491,23 @@ function renderTable() {
   const techFields = ["CreationDate", "Creator", "EditDate", "Editor", "PersonaUltimaEdicionID", "FechaUltimaEdicionFuncional", "PersonaID"];
   
   if (PERSON_FIELDS_CONFIG[key]) { PERSON_FIELDS_CONFIG[key].forEach(c => techFields.push(c.guidF)); }
+  if (key === "SEG_Asignacion") techFields.push("PersonaGlobalID", "TareaGlobalID", "ActividadID"); // Se reemplazan por vista amigable
   
   let fields = metaCache[key].fields.filter(f => 
     f.name === "OBJECTID" || (!f.name.includes("GlobalID") && !f.name.includes("Guid") && !techFields.includes(f.name) && f.name !== "IndicadorID" && !(key === "CFG_Actividad" && f.name === "Nombre"))
   );
+
+  // Inyecciones para vista amigable de SEG_
+  if (key === "SEG_Asignacion") {
+      fields.splice(1, 0, {name:"_Persona_Virtual", alias:"Persona"}, {name:"_Actividad_Virtual", alias:"Actividad"}, {name:"_Tarea_Virtual", alias:"Tarea"});
+  } else if (key === "SEG_PersonaRol") {
+      fields.splice(1, 0, {name:"_Persona_Virtual", alias:"Persona"});
+  } else if (key === "SEG_Alcance") {
+      fields.splice(2, 0, {name:"_Objeto_Virtual", alias:"Objeto de Alcance"});
+  }
   
   let sortedRows = [...currentRows];
-  if(currentSort.col) {
+  if(currentSort.col && !currentSort.col.includes("_Virtual")) {
     sortedRows.sort((a,b) => {
       let va = a.attributes[currentSort.col], vb = b.attributes[currentSort.col];
       if(va === vb) return 0; if(va == null) return 1; if(vb == null) return -1;
@@ -508,7 +518,7 @@ function renderTable() {
 
   const ths = fields.map(f => {
     let c = ""; if(currentSort.col === f.name) c = currentSort.dir === 1 ? "sort-asc" : "sort-desc";
-    return `<th class="sortable ${c}" onclick="toggleSort('${f.name}')">${f.alias}</th>`;
+    return `<th class="${f.name.includes('_Virtual')?'':'sortable'} ${c}" ${f.name.includes('_Virtual')?'':'onclick="toggleSort(\''+f.name+'\')"'}>${f.alias}</th>`;
   }).join("");
   document.getElementById("tbl-head").innerHTML = `<tr><th style="width:200px;">Acciones</th>${ths}</tr>`;
 
@@ -522,8 +532,46 @@ function renderTable() {
       ${canDel ? `<button class="btn btn--danger btn-xs" onclick="confirmDelete(${oid})">Eliminar</button>` : ''}
     </div></td>`;
     tds += fields.map(f => {
-      let v = r.attributes[f.name]; if(f.type === "esriFieldTypeDate" && v) v = new Date(v).toLocaleDateString();
-      return `<td>${esc(v)}</td>`;
+      let rawVal = r.attributes[f.name];
+      let displayVal = rawVal;
+
+      // Renderizado Amigable SEG_*
+      if (f.name === "_Persona_Virtual") {
+          const pgid = r.attributes.PersonaGlobalID || r.attributes.PersonaID;
+          const p = catalogs["SEG_Persona"]?.find(x => x.GlobalID === pgid || String(x.PersonaID) === String(pgid));
+          displayVal = p ? p.Nombre : pgid;
+      } else if (f.name === "_Actividad_Virtual" && key === "SEG_Asignacion") {
+          const tGid = r.attributes.TareaGlobalID;
+          const tar = catalogs["CFG_Tarea"]?.find(t => t.GlobalID === tGid);
+          if (tar) {
+              const sub = catalogs["CFG_SubActividad"]?.find(s => s.GlobalID === tar.SubActividadGlobalID);
+              if (sub) {
+                  const act = catalogs["CFG_Actividad"]?.find(a => a.GlobalID === sub.ActividadGlobalID);
+                  displayVal = act ? act.NombreActividad : "";
+              }
+          }
+      } else if (f.name === "_Tarea_Virtual" && key === "SEG_Asignacion") {
+          const tGid = r.attributes.TareaGlobalID;
+          const tar = catalogs["CFG_Tarea"]?.find(t => t.GlobalID === tGid);
+          displayVal = tar ? `${tar.CodigoTarea||''} - ${tar.NombreTarea||''}` : tGid;
+      } else if (f.name === "RolID") {
+          const rol = catalogs["SEG_Rol"]?.find(x => String(x.RolID) === String(rawVal));
+          if (rol) displayVal = rol.NombreRol;
+      } else if (f.name === "_Objeto_Virtual" && key === "SEG_Alcance") {
+          const nivel = r.attributes.NivelJerarquia;
+          const objGid = r.attributes.ObjetoGlobalID || r.attributes.ObjetoID;
+          if (nivel && objGid) {
+              let catKey = "CFG_" + nivel.charAt(0).toUpperCase() + nivel.slice(1).toLowerCase();
+              if(nivel.toUpperCase() === "SUBACTIVIDAD") catKey = "CFG_SubActividad";
+              if(nivel.toUpperCase() === "PAC") catKey = "CFG_PAC";
+              const obj = catalogs[catKey]?.find(x => x.GlobalID === objGid || String(x.OBJECTID) === String(objGid) || String(x[catKey.replace('CFG_','')+'ID']) === String(objGid) || x.CodigoTarea === objGid || x.CodigoSubActividad === objGid);
+              if (obj) displayVal = buildEntityLabel(catKey, obj);
+          }
+      } else if (f.type === "esriFieldTypeDate" && rawVal) {
+          displayVal = new Date(rawVal).toLocaleDateString();
+      }
+
+      return `<td>${esc(displayVal)}</td>`;
     }).join("");
     return `<tr>${tds}</tr>`;
   }).join("");
@@ -572,7 +620,7 @@ window.confirmDelete = async function(oid) {
   }
 };
 
-/* ===== 6. FORMULARIOS ===== */
+/* ===== 6. FORMULARIOS (Integración de Cascada SEG_*) ===== */
 function openModalForm(oid = null, isDuplicate = false) {
   const key = currentEntityKey; 
   window.isDuplicating = isDuplicate; 
@@ -613,17 +661,26 @@ function openModalForm(oid = null, isDuplicate = false) {
   });
 
   sortedFields.forEach(f => {
-    if(techFields.includes(f.name)) return;
+    if(techFields.includes(f.name) && !(key === "SEG_PersonaRol" && f.name === "PersonaID")) return;
 
     const val = editingRow ? editingRow.attributes[f.name] : (f.name === "Vigencia" ? document.getElementById("sel-vigencia").value : "");
     const dom = metaCache[key].domainsByField[f.name];
     const isFK = FK_MAPPING[f.name];
     
-    if(f.name === parentTextF || (key === "CFG_Actividad" && f.name === "Nombre")) {
+    // Ocultar campos que maneja internamente la UI
+    if(
+        f.name === parentTextF || 
+        (key === "CFG_Actividad" && f.name === "Nombre") ||
+        (key === "SEG_Persona" && f.name === "DependenciaCodigo") ||
+        (key === "SEG_Asignacion" && (f.name === "IndicadorID" || f.name === "ClaveUnicaAsignacion" || f.name === "ActividadID")) ||
+        (key === "SEG_Alcance" && (f.name === "ObjetoGlobalID" || f.name === "ObjetoID")) ||
+        (key === "SEG_PersonaRol" && f.name === "PersonaRolID")
+    ) {
         hiddenHtml += `<input type="hidden" data-field="${f.name}" data-type="${f.type}" id="hidden-${f.name}" value="${esc(val)}" />`; 
         return;
     }
     
+    // Configuración Genérica de Personas
     if (PERSON_FIELDS_CONFIG[key]) {
         const pConf = PERSON_FIELDS_CONFIG[key].find(c => c.textF === f.name || c.guidF === f.name);
         if (pConf) {
@@ -656,9 +713,24 @@ function openModalForm(oid = null, isDuplicate = false) {
         }
     }
     
-    if(f.name.includes("GlobalID") || f.name.includes("Guid")) {
-        if(isFK && catalogs[isFK]) {
-            let opts = catalogs[isFK].map(c => `<option value="${esc(c.GlobalID || c[f.name])}" ${val===(c.GlobalID || c[f.name])?'selected':''}>${esc(buildEntityLabel(isFK, c))}</option>`).join("");
+    if (key === "SEG_Asignacion" && f.name === "TareaGlobalID") {
+        let actOpts = `<option value="">- Seleccione Actividad -</option>`;
+        catalogs["CFG_Actividad"]?.forEach(a => { actOpts += `<option value="${a.GlobalID}">${buildEntityLabel("CFG_Actividad", a)}</option>`; });
+        html += `<div class="field"><label>Actividad (Filtro)</label><select id="sel-synthetic-actividad">${actOpts}</select></div>`;
+    }
+
+    if (key === "SEG_Alcance" && f.name === "NivelJerarquia") {
+        let opts = dom.map(d => `<option value="${esc(d.code)}" ${val===d.code?'selected':''}>${esc(d.name)}</option>`).join("");
+        html += `<div class="field" id="field-wrap-${f.name}"><label>${f.alias}</label><select data-field="${f.name}" data-type="${f.type}">${opts}</select></div>`;
+        html += `<div class="field"><label>Objeto de Alcance <span style="color:#d64545">*</span></label><select id="sel-alcance-objeto"><option value="">- Seleccione Nivel Primero -</option></select></div>`;
+        return;
+    }
+
+    if(f.name.includes("GlobalID") || f.name.includes("Guid") || (key === "SEG_PersonaRol" && f.name === "PersonaID")) {
+        let lookupKey = isFK || f.name.replace("GlobalID","");
+        if(key === "SEG_PersonaRol" && f.name === "PersonaID") lookupKey = "SEG_Persona";
+        if(lookupKey && catalogs[lookupKey]) {
+            let opts = catalogs[lookupKey].map(c => `<option value="${esc(c.GlobalID || c[f.name])}" ${val===(c.GlobalID || c[f.name])?'selected':''}>${esc(buildEntityLabel(lookupKey, c))}</option>`).join("");
             html += `<div class="field" id="field-wrap-${f.name}"><label>${f.alias}</label><select data-field="${f.name}" data-type="${f.type}" data-parent="1"><option value="">- Selecciona -</option>${opts}</select></div>`;
         }
         return; 
@@ -713,6 +785,58 @@ function openModalForm(oid = null, isDuplicate = false) {
     checkWeight(key);
   }
 
+  // Cascada SEG_Asignacion (Actividad -> Tarea)
+  if (key === "SEG_Asignacion") {
+      const selAct = document.getElementById("sel-synthetic-actividad");
+      const selTar = formDyn.querySelector('[data-field="TareaGlobalID"]');
+      const updateTareas = () => {
+          const actGid = selAct.value;
+          const subActs = catalogs["CFG_SubActividad"]?.filter(s => s.ActividadGlobalID === actGid).map(s => s.GlobalID) || [];
+          const validTareas = catalogs["CFG_Tarea"]?.filter(t => subActs.includes(t.SubActividadGlobalID)) || [];
+          let opts = `<option value="">- Selecciona Tarea -</option>`;
+          validTareas.forEach(t => {
+              const sel = (editingRow && editingRow.attributes.TareaGlobalID === t.GlobalID) ? 'selected' : '';
+              opts += `<option value="${t.GlobalID}" ${sel}>${buildEntityLabel("CFG_Tarea", t)}</option>`;
+          });
+          selTar.innerHTML = opts;
+      };
+      if (selAct && selTar) {
+          selAct.addEventListener("change", updateTareas);
+          if (editingRow && editingRow.attributes.TareaGlobalID) {
+              const tar = catalogs["CFG_Tarea"]?.find(t => t.GlobalID === editingRow.attributes.TareaGlobalID);
+              if (tar) {
+                  const sub = catalogs["CFG_SubActividad"]?.find(s => s.GlobalID === tar.SubActividadGlobalID);
+                  if (sub) { selAct.value = sub.ActividadGlobalID; updateTareas(); selTar.value = tar.GlobalID; }
+              }
+          }
+      }
+  }
+
+  // Cascada SEG_Alcance (Nivel -> Objeto)
+  if (key === "SEG_Alcance") {
+      const selNivel = formDyn.querySelector('[data-field="NivelJerarquia"]');
+      const selObj = document.getElementById("sel-alcance-objeto");
+      const updateObjetos = () => {
+          const nivel = selNivel.value;
+          selObj.innerHTML = `<option value="">- Seleccione Objeto -</option>`;
+          if (!nivel) return;
+          let catKey = "CFG_" + nivel.charAt(0).toUpperCase() + nivel.slice(1).toLowerCase();
+          if(nivel.toUpperCase() === "SUBACTIVIDAD") catKey = "CFG_SubActividad";
+          if(nivel.toUpperCase() === "PAC") catKey = "CFG_PAC";
+          
+          let opts = `<option value="">- Selecciona -</option>`;
+          (catalogs[catKey] || []).forEach(i => {
+               const isSel = (editingRow && (editingRow.attributes.ObjetoGlobalID === i.GlobalID || String(editingRow.attributes.ObjetoID) === String(i[catKey.replace('CFG_','')+'ID'] || i.OBJECTID))) ? 'selected' : '';
+               opts += `<option value="${i.GlobalID}" ${isSel}>${buildEntityLabel(catKey, i)}</option>`;
+          });
+          selObj.innerHTML = opts;
+      };
+      if (selNivel && selObj) {
+          selNivel.addEventListener("change", updateObjetos);
+          if (editingRow) updateObjetos();
+      }
+  }
+
   if (key === "PLAN_TareaVigencia") {
       const elAplica = formDyn.querySelector('[data-field="AplicaTopeAcumulado"]');
       const toggleTopes = () => {
@@ -760,7 +884,7 @@ async function checkWeight(key) {
   } catch(e) {}
 }
 
-/* ===== 7. GUARDADO CON VALIDACIONES (TOPES, DUPLICADOS Y AUDITORÍA) ===== */
+/* ===== 7. GUARDADO CON VALIDACIONES Y LÓGICA SEG_* ===== */
 async function save() {
   const key = currentEntityKey, attrs = {};
   const isUpdate = !!editingRow && !window.isDuplicating;
@@ -788,6 +912,31 @@ async function save() {
 
   if(key === "CFG_Actividad") attrs["Nombre"] = attrs["NombreActividad"];
 
+  // Lógica Especial SEG_*
+  if (key === "SEG_Persona") {
+      attrs["DependenciaCodigo"] = attrs["Dependencia"];
+  }
+  if (key === "SEG_Asignacion") {
+      const vig = attrs["Vigencia"] || document.getElementById("sel-vigencia").value;
+      if (!attrs["PersonaGlobalID"] || !attrs["TareaGlobalID"] || !vig) throw new Error("Debe seleccionar Persona, Tarea y Vigencia.");
+      attrs["ClaveUnicaAsignacion"] = `${attrs["PersonaGlobalID"]}|${attrs["TareaGlobalID"]}|${vig}`;
+  }
+  if (key === "SEG_Alcance") {
+      const nivel = attrs["NivelJerarquia"];
+      const selObjVal = document.getElementById("sel-alcance-objeto")?.value;
+      if (!nivel || !selObjVal) throw new Error("Debe seleccionar el Nivel y el Objeto de alcance.");
+      attrs["ObjetoGlobalID"] = selObjVal;
+      let catKey = "CFG_" + nivel.charAt(0).toUpperCase() + nivel.slice(1).toLowerCase();
+      if(nivel.toUpperCase() === "SUBACTIVIDAD") catKey = "CFG_SubActividad";
+      if(nivel.toUpperCase() === "PAC") catKey = "CFG_PAC";
+      const objItem = catalogs[catKey]?.find(x => x.GlobalID === selObjVal);
+      if (objItem) {
+          const idField = catKey.replace("CFG_", "") + "ID";
+          attrs["ObjetoID"] = objItem[idField] || objItem.CodigoTarea || objItem.CodigoSubActividad || String(objItem.OBJECTID);
+      }
+  }
+
+  // Personas Genéricas
   if (PERSON_FIELDS_CONFIG[key]) {
       for (let pConf of PERSON_FIELDS_CONFIG[key]) {
           const selGid = attrs[pConf.guidF];
@@ -849,7 +998,8 @@ async function save() {
           const inputEl = formDyn.querySelector(`[data-field="${uniqueField}"]`);
           if(inputEl) { inputEl.classList.add("field-error"); inputEl.focus(); }
           let errMsg = `No se puede guardar: Ya existe un registro con el código '${codeVal}'`;
-          if (!key.startsWith("CFG_") && attrs.Vigencia) errMsg += ` para la vigencia ${attrs.Vigencia}`;
+          if (key === "SEG_Asignacion") errMsg = "Ya existe una asignación activa para esta Persona, Tarea y Vigencia.";
+          else if (!key.startsWith("CFG_") && attrs.Vigencia) errMsg += ` para la vigencia ${attrs.Vigencia}`;
           errMsg += isDuplicate ? " (Debe cambiar el código al duplicar)." : ".";
           throw new Error(errMsg);
       }
@@ -896,7 +1046,7 @@ async function save() {
       }
 
       document.getElementById("modal").classList.remove("is-open");
-      if(key.startsWith("CFG_")) await loadCatalogs(true); 
+      if(key.startsWith("CFG_") || key.startsWith("SEG_")) await loadCatalogs(true); 
       await loadEntity(key, false);
   } catch (err) {
       await writeAuditEvent(isUpdate ? "UPDATE" : "CREATE", key, isUpdate ? originalAttrs.GlobalID : attrs.GlobalID, "ERROR", err.message); throw err;
@@ -982,7 +1132,6 @@ if (btnExecClone) {
 
 async function processClone(entityKey, origen, destino, fkField, pacGid) {
     const result = { created: 0, skipped: 0, errors: 0 };
-    
     const sourceRes = await fetchJson(`${entityUrl(entityKey)}/query`, { f:"json", where:`Vigencia=${origen}`, outFields:"*", returnGeometry:false });
     let sourceRows = sourceRes.features || [];
     if(sourceRows.length === 0) return result;
@@ -1001,38 +1150,27 @@ async function processClone(entityKey, origen, destino, fkField, pacGid) {
     for(let row of sourceRows) {
         const attrs = row.attributes;
         const fkVal = attrs[fkField];
-        
-        if(existingFks.has(fkVal)) {
-            result.skipped++;
-            continue;
-        }
+        if(existingFks.has(fkVal)) { result.skipped++; continue; }
         
         const newAttrs = { ...attrs };
         delete newAttrs.OBJECTID;
         newAttrs.GlobalID = generateGUID();
         newAttrs.Vigencia = Number(destino);
         
-        delete newAttrs.CreationDate;
-        delete newAttrs.Creator;
-        delete newAttrs.EditDate;
-        delete newAttrs.Editor;
+        delete newAttrs.CreationDate; delete newAttrs.Creator; delete newAttrs.EditDate; delete newAttrs.Editor;
         if(newAttrs.PersonaUltimaEdicionID !== undefined) newAttrs.PersonaUltimaEdicionID = SESSION.personaID;
         
         adds.push({ attributes: newAttrs });
     }
     
     if(adds.length === 0) return result;
-    
     const chunkSize = 100;
     for(let i=0; i<adds.length; i+=chunkSize) {
         const chunk = adds.slice(i, i+chunkSize);
         try {
             const postRes = await postForm(`${entityUrl(entityKey)}/applyEdits`, { adds: chunk });
             if(postRes.addResults) {
-                postRes.addResults.forEach(r => {
-                    if(r.success) result.created++;
-                    else result.errors++;
-                });
+                postRes.addResults.forEach(r => { if(r.success) result.created++; else result.errors++; });
             }
         } catch(e) {
             console.error(`Error clonando chunk de ${entityKey}:`, e);
