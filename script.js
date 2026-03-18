@@ -1,7 +1,7 @@
 /* ===========================================================
    DATA-PAC | Admin OAP V3 (script.js)
    - OTP Auth, RBAC, Auditoría, Personas Genéricas, Duplicar
-   - MEJORA FINAL: RolID Amigable y Banner Rojo para Duplicados
+   - MEJORA FINAL: RolID Amigable y Value HTML exacto
    =========================================================== */
 
 const SERVICE_URL = "https://services6.arcgis.com/yq6pe3Lw2oWFjWtF/arcgis/rest/services/DATAPAC_V3/FeatureServer";
@@ -32,8 +32,7 @@ const FK_MAPPING = {
   PACGlobalID: "CFG_PAC", LineaGlobalID: "CFG_Linea", ProgramaGlobalID: "CFG_Programa",
   ProyectoGlobalID: "CFG_Proyecto", ObjetivoGlobalID: "CFG_Objetivo", ActividadGlobalID: "CFG_Actividad",
   SubActividadGlobalID: "CFG_SubActividad", TareaGlobalID: "CFG_Tarea", PersonaGlobalID: "SEG_Persona",
-  ResponsableGlobalID: "SEG_Persona", PersonaID: "SEG_Persona" 
-  // Nota: RolID se procesa ahora de forma específica en openModalForm y renderTable
+  RolID: "SEG_Rol", ResponsableGlobalID: "SEG_Persona", PersonaID: "SEG_Persona"
 };
 
 const CHILDREN_RULES = [
@@ -86,7 +85,6 @@ function setStatus(msg, type="info", isOtp=false){
   el.style.color = type === "error" ? "#d64545" : "inherit";
 }
 
-// NUEVO: Ayudante para mostrar banner rojo dentro del formulario
 function showFormError(msg) {
     const errDiv = document.getElementById("form-error");
     if(errDiv) { errDiv.textContent = msg; errDiv.style.display = "block"; }
@@ -211,9 +209,7 @@ async function initSession() {
     document.getElementById("pill-user").textContent = `Usuario: ${SESSION.nombre} (${SESSION.roles.join(", ")})`;
     
     const btnClone = document.getElementById("btn-open-clone");
-    if (btnClone) {
-        btnClone.style.display = SESSION.isSuperAdmin ? "inline-flex" : "none";
-    }
+    if (btnClone) btnClone.style.display = SESSION.isSuperAdmin ? "inline-flex" : "none";
     
     buildDynamicMenu();
   } catch(e) { setStatus(e.message, "error", true); }
@@ -720,7 +716,7 @@ function openModalForm(oid = null, isDuplicate = false) {
         }
     }
     
-    // Tratamiento especial exhaustivo para RolID (Selector y auto-resolución legacy)
+    // CORRECCIÓN: Renderizado explícito para RolID (Asegura Value=RolID y Text=NombreRol, manejando legacy)
     if (f.name === "RolID") {
         let currentRolVal = val;
         let oldRolHint = "";
@@ -773,7 +769,11 @@ function openModalForm(oid = null, isDuplicate = false) {
         if(key === "SEG_PersonaRol" && f.name === "PersonaID") lookupKey = "SEG_Persona";
         
         if(lookupKey && catalogs[lookupKey]) {
-            let opts = catalogs[lookupKey].map(c => `<option value="${esc(c.GlobalID || c[f.name])}" ${val===(c.GlobalID || c[f.name])?'selected':''}>${esc(buildEntityLabel(lookupKey, c))}</option>`).join("");
+            let opts = catalogs[lookupKey].map(c => {
+                const optVal = (f.name === "RolID") ? c.RolID : (c.GlobalID || c[f.name]);
+                const isSel = (String(val) === String(optVal)) ? 'selected' : '';
+                return `<option value="${esc(optVal)}" ${isSel}>${esc(buildEntityLabel(lookupKey, c))}</option>`;
+            }).join("");
             html += `<div class="field" id="field-wrap-${f.name}"><label>${f.alias}</label><select data-field="${f.name}" data-type="${f.type}" data-parent="1"><option value="">- Selecciona -</option>${opts}</select></div>`;
         }
         return; 
