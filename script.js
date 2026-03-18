@@ -32,7 +32,7 @@ const FK_MAPPING = {
   PACGlobalID: "CFG_PAC", LineaGlobalID: "CFG_Linea", ProgramaGlobalID: "CFG_Programa",
   ProyectoGlobalID: "CFG_Proyecto", ObjetivoGlobalID: "CFG_Objetivo", ActividadGlobalID: "CFG_Actividad",
   SubActividadGlobalID: "CFG_SubActividad", TareaGlobalID: "CFG_Tarea", PersonaGlobalID: "SEG_Persona",
-  ResponsableGlobalID: "SEG_Persona", PersonaID: "SEG_Persona" 
+  RolID: "SEG_Rol", ResponsableGlobalID: "SEG_Persona", PersonaID: "SEG_Persona" 
 };
 
 const CHILDREN_RULES = [
@@ -225,9 +225,22 @@ async function resolveHierarchy(alcances) {
     if(SESSION.allowedGuids[k] && alc.ObjetoGlobalID) SESSION.allowedGuids[k].add(alc.ObjetoGlobalID);
   });
   
+  // Especificar outFields por tabla para no solicitar campos inexistentes
+  const fieldsMap = {
+    "CFG_PAC": "GlobalID",
+    "CFG_Linea": "GlobalID,PACGlobalID",
+    "CFG_Programa": "GlobalID,LineaGlobalID",
+    "CFG_Proyecto": "GlobalID,ProgramaGlobalID",
+    "CFG_Objetivo": "GlobalID,ProyectoGlobalID",
+    "CFG_Actividad": "GlobalID,ObjetivoGlobalID",
+    "CFG_SubActividad": "GlobalID,ActividadGlobalID",
+    "CFG_Tarea": "GlobalID,SubActividadGlobalID"
+  };
+  
   const arbol = {};
   for(let c of cfgs) {
-    const r = await fetchJson(entityUrl(c) + "/query", { f: "json", where: "1=1", outFields: "GlobalID,PACGlobalID,LineaGlobalID,ProgramaGlobalID,ProyectoGlobalID,ObjetivoGlobalID,ActividadGlobalID,SubActividadGlobalID", returnGeometry: false });
+    const outF = fieldsMap[c] || "GlobalID";
+    const r = await fetchJson(entityUrl(c) + "/query", { f: "json", where: "1=1", outFields: outF, returnGeometry: false });
     arbol[c] = (r.features || []).map(f => f.attributes);
   }
   
