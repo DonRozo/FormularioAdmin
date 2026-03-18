@@ -1,7 +1,7 @@
 /* ===========================================================
    DATA-PAC | Admin OAP V3 (script.js)
    - OTP Auth, RBAC, Auditoría, Personas Genéricas, Duplicar
-   - MEJORA FINAL: RolID Amigable y Value HTML exacto
+   - MEJORA FINAL: RolID con etiqueta combinada (RolID - Nombre)
    =========================================================== */
 
 const SERVICE_URL = "https://services6.arcgis.com/yq6pe3Lw2oWFjWtF/arcgis/rest/services/DATAPAC_V3/FeatureServer";
@@ -32,7 +32,7 @@ const FK_MAPPING = {
   PACGlobalID: "CFG_PAC", LineaGlobalID: "CFG_Linea", ProgramaGlobalID: "CFG_Programa",
   ProyectoGlobalID: "CFG_Proyecto", ObjetivoGlobalID: "CFG_Objetivo", ActividadGlobalID: "CFG_Actividad",
   SubActividadGlobalID: "CFG_SubActividad", TareaGlobalID: "CFG_Tarea", PersonaGlobalID: "SEG_Persona",
-  RolID: "SEG_Rol", ResponsableGlobalID: "SEG_Persona", PersonaID: "SEG_Persona"
+  ResponsableGlobalID: "SEG_Persona", PersonaID: "SEG_Persona" 
 };
 
 const CHILDREN_RULES = [
@@ -716,7 +716,6 @@ function openModalForm(oid = null, isDuplicate = false) {
         }
     }
     
-    // CORRECCIÓN: Renderizado explícito para RolID (Asegura Value=RolID y Text=NombreRol, manejando legacy)
     if (f.name === "RolID") {
         let currentRolVal = val;
         let oldRolHint = "";
@@ -724,7 +723,6 @@ function openModalForm(oid = null, isDuplicate = false) {
         if (editingRow && currentRolVal) {
             const rawStr = String(currentRolVal).trim().toLowerCase();
             let matchedRol = catalogs["SEG_Rol"]?.find(r => String(r.RolID).trim().toLowerCase() === rawStr);
-            
             if (!matchedRol) {
                 matchedRol = catalogs["SEG_Rol"]?.find(r => 
                     (r.NombreRol && r.NombreRol.trim().toLowerCase() === rawStr) ||
@@ -733,13 +731,18 @@ function openModalForm(oid = null, isDuplicate = false) {
                 if (matchedRol) {
                     currentRolVal = matchedRol.RolID; 
                 } else {
-                    oldRolHint = `(Antiguo: ${esc(currentRolVal)})`;
+                    oldRolHint = `(Antiguo: ${esc(val)})`;
                     currentRolVal = ""; 
                 }
             }
         }
 
-        let opts = (catalogs["SEG_Rol"] || []).map(c => `<option value="${esc(c.RolID)}" ${String(currentRolVal) === String(c.RolID) ? 'selected' : ''}>${esc(c.NombreRol)}</option>`).join("");
+        let opts = (catalogs["SEG_Rol"] || []).map(c => {
+            const isSel = (String(currentRolVal) === String(c.RolID)) ? 'selected' : '';
+            const labelText = c.NombreRol ? `${c.RolID} - ${c.NombreRol}` : c.RolID;
+            return `<option value="${esc(c.RolID)}" ${isSel}>${esc(labelText)}</option>`;
+        }).join("");
+        
         html += `<div class="field" id="field-wrap-${f.name}">
                     <label>${f.alias} <span style="color:#d64545">*</span></label>
                     <select data-field="${f.name}" data-type="${f.type}" id="sel-${f.name}">
@@ -770,7 +773,7 @@ function openModalForm(oid = null, isDuplicate = false) {
         
         if(lookupKey && catalogs[lookupKey]) {
             let opts = catalogs[lookupKey].map(c => {
-                const optVal = (f.name === "RolID") ? c.RolID : (c.GlobalID || c[f.name]);
+                const optVal = c.GlobalID || c[f.name];
                 const isSel = (String(val) === String(optVal)) ? 'selected' : '';
                 return `<option value="${esc(optVal)}" ${isSel}>${esc(buildEntityLabel(lookupKey, c))}</option>`;
             }).join("");
@@ -927,7 +930,7 @@ async function checkWeight(key) {
   } catch(e) {}
 }
 
-/* ===== 7. GUARDADO CON VALIDACIONES (TOPES Y DUPLICADOS) ===== */
+/* ===== 7. GUARDADO CON VALIDACIONES (TOPES, DUPLICADOS Y AUDITORÍA) ===== */
 async function save() {
   const errDiv = document.getElementById("form-error");
   if(errDiv) errDiv.style.display = "none";
