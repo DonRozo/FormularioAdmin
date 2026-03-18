@@ -1,7 +1,7 @@
 /* ===========================================================
    DATA-PAC | Admin OAP V3 (script.js)
-   - OTP Auth, RBAC, Personas Genéricas, PAC Context
-   - MEJORA: Refactorización funcional de módulo de seguridad (SEG_*)
+   - OTP Auth, RBAC, Auditoría, Personas Genéricas, Duplicar
+   - MEJORA: Pulido UX SEG_*, Selector de Rol y Red Banners de Error
    =========================================================== */
 
 const SERVICE_URL = "https://services6.arcgis.com/yq6pe3Lw2oWFjWtF/arcgis/rest/services/DATAPAC_V3/FeatureServer";
@@ -277,7 +277,6 @@ async function loadCatalogs(forceBase = false) {
     if (!forceBase && isStruct && catalogs[k] && catalogs[k].length > 0) return; 
     
     const w = (!isStruct && metaCache[k]?.fieldsByName?.["Vigencia"]) ? vigW : "1=1";
-    // Si es SEG_Rol, ordenarlo por el campo Orden
     const orderClause = (k === "SEG_Rol") ? "Orden ASC" : `${nameF} ASC`;
     const r = await fetchJson(`${entityUrl(k)}/query`, { f: "json", where: w, outFields: `GlobalID,${nameF}${extra}`, orderByFields: orderClause, returnGeometry: false });
     catalogs[k] = (r.features || []).map(f => f.attributes);
@@ -433,7 +432,7 @@ function buildWhere(key) {
   return `${securityW} AND (${clauses.join(" OR ")})`;
 }
 
-/* ===== 4. TABLA (Nombres Amigables SEG_*) ===== */
+/* ===== 4. TABLA CON ORDENAMIENTO Y ACCIÓN DUPLICAR ===== */
 async function getMeta(key){
   if(metaCache[key]) return metaCache[key];
   const m = await fetchJson(`${entityUrl(key)}?f=pjson`);
@@ -447,7 +446,12 @@ async function loadEntity(key, clearSearch = false) {
   if (clearSearch) document.getElementById("txt-search").value = "";
   
   currentEntityKey = key; 
-  document.querySelectorAll(".navitem").forEach(b => { b.classList.toggle("is-active", b.textContent.includes(key)); });
+  document.querySelectorAll(".navitem").forEach(b => { 
+      const titleEl = b.querySelector('.navitem__title');
+      if(titleEl) {
+          b.classList.toggle("is-active", titleEl.textContent === key); 
+      }
+  });
   
   const isCfg = key.startsWith("CFG_");
   const pacSel = document.getElementById("sel-pac");
@@ -488,16 +492,15 @@ window.toggleSort = function(col) {
 
 function renderTable() {
   const key = currentEntityKey, canWrite = hasWritePermission(key), canDel = canDelete();
-  const techFields = ["CreationDate", "Creator", "EditDate", "Editor", "PersonaUltimaEdicionID", "FechaUltimaEdicionFuncional", "PersonaID"];
+  const techFields = ["CreationDate", "Creator", "EditDate", "Editor", "PersonaUltimaEdicionID", "FechaUltimaEdicionFuncional", "PersonaID", "ClaveUnicaAsignacion", "PersonaRolID", "AlcanceID"];
   
   if (PERSON_FIELDS_CONFIG[key]) { PERSON_FIELDS_CONFIG[key].forEach(c => techFields.push(c.guidF)); }
-  if (key === "SEG_Asignacion") techFields.push("PersonaGlobalID", "TareaGlobalID", "ActividadID"); // Se reemplazan por vista amigable
+  if (key === "SEG_Asignacion") techFields.push("PersonaGlobalID", "TareaGlobalID", "ActividadID"); 
   
   let fields = metaCache[key].fields.filter(f => 
     f.name === "OBJECTID" || (!f.name.includes("GlobalID") && !f.name.includes("Guid") && !techFields.includes(f.name) && f.name !== "IndicadorID" && !(key === "CFG_Actividad" && f.name === "Nombre"))
   );
 
-  // Inyecciones para vista amigable de SEG_
   if (key === "SEG_Asignacion") {
       fields.splice(1, 0, {name:"_Persona_Virtual", alias:"Persona"}, {name:"_Actividad_Virtual", alias:"Actividad"}, {name:"_Tarea_Virtual", alias:"Tarea"});
   } else if (key === "SEG_PersonaRol") {
@@ -535,7 +538,6 @@ function renderTable() {
       let rawVal = r.attributes[f.name];
       let displayVal = rawVal;
 
-      // Renderizado Amigable SEG_*
       if (f.name === "_Persona_Virtual") {
           const pgid = r.attributes.PersonaGlobalID || r.attributes.PersonaID;
           const p = catalogs["SEG_Persona"]?.find(x => x.GlobalID === pgid || String(x.PersonaID) === String(pgid));
@@ -620,7 +622,7 @@ window.confirmDelete = async function(oid) {
   }
 };
 
-/* ===== 6. FORMULARIOS (Integración de Cascada SEG_*) ===== */
+/* ===== 6. FORMULARIOS (Cascadas y Validaciones UI) ===== */
 function openModalForm(oid = null, isDuplicate = false) {
   const key = currentEntityKey; 
   window.isDuplicating = isDuplicate; 
@@ -637,7 +639,7 @@ function openModalForm(oid = null, isDuplicate = false) {
   document.getElementById("btn-save").style.display = hasWritePermission(key) ? "inline-flex" : "none";
   
   let html = "", hiddenHtml = "";
-  const techFields = ["OBJECTID", "CreationDate", "Creator", "EditDate", "Editor", "PersonaUltimaEdicionID", "FechaUltimaEdicionFuncional", "PersonaID"];
+  const techFields = ["OBJECTID", "CreationDate", "Creator", "EditDate", "Editor", "PersonaUltimaEdicionID", "FechaUltimaEdicionFuncional", "PersonaID", "ClaveUnicaAsignacion", "PersonaRolID", "AlcanceID"];
   const parentTextF = PARENT_RULES[key]?.parentText;
   const largeTextFields = ["Definicion", "ObservacionesPlaneacion", "TextoNarrativo", "PrincipalesLogros", "DescripcionLogrosAlcanzados", "Observaciones", "DescripcionSitio"];
 
@@ -667,7 +669,6 @@ function openModalForm(oid = null, isDuplicate = false) {
     const dom = metaCache[key].domainsByField[f.name];
     const isFK = FK_MAPPING[f.name];
     
-    // Ocultar campos que maneja internamente la UI
     if(
         f.name === parentTextF || 
         (key === "CFG_Actividad" && f.name === "Nombre") ||
@@ -680,7 +681,6 @@ function openModalForm(oid = null, isDuplicate = false) {
         return;
     }
     
-    // Configuración Genérica de Personas
     if (PERSON_FIELDS_CONFIG[key]) {
         const pConf = PERSON_FIELDS_CONFIG[key].find(c => c.textF === f.name || c.guidF === f.name);
         if (pConf) {
@@ -726,9 +726,11 @@ function openModalForm(oid = null, isDuplicate = false) {
         return;
     }
 
-    if(f.name.includes("GlobalID") || f.name.includes("Guid") || (key === "SEG_PersonaRol" && f.name === "PersonaID")) {
+    if(f.name.includes("GlobalID") || f.name.includes("Guid") || f.name === "RolID" || (key === "SEG_PersonaRol" && f.name === "PersonaID")) {
         let lookupKey = isFK || f.name.replace("GlobalID","");
+        if(f.name === "RolID") lookupKey = "SEG_Rol";
         if(key === "SEG_PersonaRol" && f.name === "PersonaID") lookupKey = "SEG_Persona";
+        
         if(lookupKey && catalogs[lookupKey]) {
             let opts = catalogs[lookupKey].map(c => `<option value="${esc(c.GlobalID || c[f.name])}" ${val===(c.GlobalID || c[f.name])?'selected':''}>${esc(buildEntityLabel(lookupKey, c))}</option>`).join("");
             html += `<div class="field" id="field-wrap-${f.name}"><label>${f.alias}</label><select data-field="${f.name}" data-type="${f.type}" data-parent="1"><option value="">- Selecciona -</option>${opts}</select></div>`;
@@ -763,7 +765,8 @@ function openModalForm(oid = null, isDuplicate = false) {
     }
   });
 
-  formDyn.innerHTML = `<div class="formgrid">${html}</div>${hiddenHtml}`;
+  // Inyectamos el Error Banner del formulario
+  formDyn.innerHTML = `<div id="form-error" style="display:none; color:#991b1b; background:#fee2e2; border:1px solid #f87171; padding:10px; border-radius:6px; margin-bottom:15px; font-weight:600; font-size:13px;"></div><div class="formgrid">${html}</div>${hiddenHtml}`;
   document.getElementById("modal").classList.add("is-open");
   
   if(PARENT_RULES[key]) {
@@ -785,7 +788,6 @@ function openModalForm(oid = null, isDuplicate = false) {
     checkWeight(key);
   }
 
-  // Cascada SEG_Asignacion (Actividad -> Tarea)
   if (key === "SEG_Asignacion") {
       const selAct = document.getElementById("sel-synthetic-actividad");
       const selTar = formDyn.querySelector('[data-field="TareaGlobalID"]');
@@ -812,7 +814,6 @@ function openModalForm(oid = null, isDuplicate = false) {
       }
   }
 
-  // Cascada SEG_Alcance (Nivel -> Objeto)
   if (key === "SEG_Alcance") {
       const selNivel = formDyn.querySelector('[data-field="NivelJerarquia"]');
       const selObj = document.getElementById("sel-alcance-objeto");
@@ -856,6 +857,8 @@ function openModalForm(oid = null, isDuplicate = false) {
 
 formDyn.addEventListener("input", (e) => {
     if(e.target.classList.contains("field-error")) e.target.classList.remove("field-error");
+    const errDiv = document.getElementById("form-error");
+    if(errDiv) errDiv.style.display = "none";
 });
 
 async function checkWeight(key) {
@@ -912,7 +915,6 @@ async function save() {
 
   if(key === "CFG_Actividad") attrs["Nombre"] = attrs["NombreActividad"];
 
-  // Lógica Especial SEG_*
   if (key === "SEG_Persona") {
       attrs["DependenciaCodigo"] = attrs["Dependencia"];
   }
@@ -936,7 +938,6 @@ async function save() {
       }
   }
 
-  // Personas Genéricas
   if (PERSON_FIELDS_CONFIG[key]) {
       for (let pConf of PERSON_FIELDS_CONFIG[key]) {
           const selGid = attrs[pConf.guidF];
@@ -997,10 +998,14 @@ async function save() {
       if (dupCheck.features && dupCheck.features.length > 0) {
           const inputEl = formDyn.querySelector(`[data-field="${uniqueField}"]`);
           if(inputEl) { inputEl.classList.add("field-error"); inputEl.focus(); }
+          
           let errMsg = `No se puede guardar: Ya existe un registro con el código '${codeVal}'`;
-          if (key === "SEG_Asignacion") errMsg = "Ya existe una asignación activa para esta Persona, Tarea y Vigencia.";
+          if (key === "SEG_Asignacion") errMsg = "Ya existe una asignación para esta persona, tarea y vigencia.";
           else if (!key.startsWith("CFG_") && attrs.Vigencia) errMsg += ` para la vigencia ${attrs.Vigencia}`;
           errMsg += isDuplicate ? " (Debe cambiar el código al duplicar)." : ".";
+          
+          const errDiv = document.getElementById("form-error");
+          if(errDiv) { errDiv.textContent = errMsg; errDiv.style.display = "block"; }
           throw new Error(errMsg);
       }
   }
@@ -1012,7 +1017,10 @@ async function save() {
           const dupWherePlan = `${fkField} = '${fkVal}' AND Vigencia = ${vigVal}`;
           const dupCheckPlan = await fetchJson(`${entityUrl(key)}/query`, { f: "json", where: dupWherePlan, outFields: "OBJECTID", returnGeometry: false });
           if (dupCheckPlan.features && dupCheckPlan.features.length > 0) {
-              throw new Error(`No se puede guardar: Ya existe un registro para la combinación Padre + Vigencia (${vigVal}). Si está duplicando, seleccione otra vigencia u otro padre.`);
+              const errMsg = `No se puede guardar: Ya existe un registro para la combinación Padre + Vigencia (${vigVal}). Si está duplicando, seleccione otra vigencia u otro padre.`;
+              const errDiv = document.getElementById("form-error");
+              if(errDiv) { errDiv.textContent = errMsg; errDiv.style.display = "block"; }
+              throw new Error(errMsg);
           }
       }
   }
@@ -1070,7 +1078,7 @@ document.getElementById("txt-search").addEventListener("input", () => {
     clearTimeout(tOut); tOut = setTimeout(() => { if(currentEntityKey) loadEntity(currentEntityKey, false); }, 350); 
 });
 
-/* Asignación Defensiva del Botón Clonar */
+/* Lógica del Modal de Clonación Segura */
 const btnOpenClone = document.getElementById("btn-open-clone");
 if (btnOpenClone) {
     btnOpenClone.addEventListener("click", () => {
