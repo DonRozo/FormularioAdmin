@@ -1,7 +1,7 @@
 /* ===========================================================
    DATA-PAC | Admin OAP V3 (script.js)
    - OTP Auth, RBAC, Auditoría, Personas Genéricas, Duplicar
-   - MEJORA: Pulido UX SEG_*, Selector de Rol y Red Banners de Error
+   - MEJORA FINAL: RolID Amigable y Banner Rojo para Duplicados
    =========================================================== */
 
 const SERVICE_URL = "https://services6.arcgis.com/yq6pe3Lw2oWFjWtF/arcgis/rest/services/DATAPAC_V3/FeatureServer";
@@ -84,6 +84,13 @@ function setStatus(msg, type="info", isOtp=false){
   el.textContent = (type === "error" ? "❌ " : (type === "success" ? "✅ " : "ℹ️ ")) + msg;
   el.style.color = type === "error" ? "#d64545" : "inherit";
 }
+
+// NUEVO: Ayudante para mostrar banner rojo dentro del formulario
+function showFormError(msg) {
+    const errDiv = document.getElementById("form-error");
+    if(errDiv) { errDiv.textContent = msg; errDiv.style.display = "block"; }
+}
+
 function esc(s){ return (s ?? "").toString().replaceAll("<","&lt;").replaceAll(">","&gt;"); }
 function entityUrl(key){ return `${SERVICE_URL}/${ENTITY[key].id}`; }
 function isReadOnly(key){ return HARD_READONLY.has(key) || !hasWritePermission(key); }
@@ -92,14 +99,10 @@ function generateGUID() { return '{' + crypto.randomUUID().toUpperCase() + '}'; 
 
 /* ===== FETCH & POST CORE ===== */
 async function fetchJson(url, params){
-  params = params || {};
-  params._ts = Date.now();
-  
+  params = params || {}; params._ts = Date.now();
   if (url.endsWith("/query")) {
       const form = new URLSearchParams();
-      Object.entries(params).forEach(([k,v]) => {
-          if (v !== undefined && v !== null) form.append(k, v);
-      });
+      Object.entries(params).forEach(([k,v]) => { if (v !== undefined && v !== null) form.append(k, v); });
       const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: form });
       if(!r.ok) throw new Error(`HTTP ${r.status} al consultar ${url}`);
       const json = await r.json();
@@ -107,9 +110,7 @@ async function fetchJson(url, params){
       return json;
   } else {
       const u = new URL(url);
-      Object.entries(params).forEach(([k,v]) => {
-          if (v !== undefined && v !== null) u.searchParams.set(k,v);
-      });
+      Object.entries(params).forEach(([k,v]) => { if (v !== undefined && v !== null) u.searchParams.set(k,v); });
       const r = await fetch(u.toString(), { method: "GET", cache: "no-store" });
       if(!r.ok) throw new Error(`HTTP ${r.status}`);
       return await r.json();
@@ -209,9 +210,7 @@ async function initSession() {
     document.getElementById("pill-user").textContent = `Usuario: ${SESSION.nombre} (${SESSION.roles.join(", ")})`;
     
     const btnClone = document.getElementById("btn-open-clone");
-    if (btnClone) {
-        btnClone.style.display = SESSION.isSuperAdmin ? "inline-flex" : "none";
-    }
+    if (btnClone) btnClone.style.display = SESSION.isSuperAdmin ? "inline-flex" : "none";
     
     buildDynamicMenu();
   } catch(e) { setStatus(e.message, "error", true); }
@@ -265,7 +264,7 @@ function buildEntityLabel(entityKey, item) {
             if (item.Nombre && item.Correo) return `${item.Nombre} — ${item.Correo}`;
             if (item.PersonaID && item.Nombre) return `${item.PersonaID} — ${item.Nombre}`;
             return item.Nombre || item.GlobalID || "(sin etiqueta)";
-        case "SEG_Rol": return safeLabel(item.RolID, item.NombreRol);
+        case "SEG_Rol": return item.NombreRol || item.RolID; // Mostrar siempre NombreRol
         default: return item.GlobalID || "(sin etiqueta)";
     }
 }
@@ -448,9 +447,7 @@ async function loadEntity(key, clearSearch = false) {
   currentEntityKey = key; 
   document.querySelectorAll(".navitem").forEach(b => { 
       const titleEl = b.querySelector('.navitem__title');
-      if(titleEl) {
-          b.classList.toggle("is-active", titleEl.textContent === key); 
-      }
+      if(titleEl) b.classList.toggle("is-active", titleEl.textContent === key); 
   });
   
   const isCfg = key.startsWith("CFG_");
@@ -558,7 +555,7 @@ function renderTable() {
           displayVal = tar ? `${tar.CodigoTarea||''} - ${tar.NombreTarea||''}` : tGid;
       } else if (f.name === "RolID") {
           const rol = catalogs["SEG_Rol"]?.find(x => String(x.RolID) === String(rawVal));
-          if (rol) displayVal = rol.NombreRol;
+          if (rol) displayVal = rol.NombreRol || rawVal;
       } else if (f.name === "_Objeto_Virtual" && key === "SEG_Alcance") {
           const nivel = r.attributes.NivelJerarquia;
           const objGid = r.attributes.ObjetoGlobalID || r.attributes.ObjetoID;
@@ -622,7 +619,7 @@ window.confirmDelete = async function(oid) {
   }
 };
 
-/* ===== 6. FORMULARIOS (Cascadas y Validaciones UI) ===== */
+/* ===== 6. FORMULARIOS ===== */
 function openModalForm(oid = null, isDuplicate = false) {
   const key = currentEntityKey; 
   window.isDuplicating = isDuplicate; 
@@ -765,7 +762,6 @@ function openModalForm(oid = null, isDuplicate = false) {
     }
   });
 
-  // Inyectamos el Error Banner del formulario
   formDyn.innerHTML = `<div id="form-error" style="display:none; color:#991b1b; background:#fee2e2; border:1px solid #f87171; padding:10px; border-radius:6px; margin-bottom:15px; font-weight:600; font-size:13px;"></div><div class="formgrid">${html}</div>${hiddenHtml}`;
   document.getElementById("modal").classList.add("is-open");
   
@@ -887,8 +883,11 @@ async function checkWeight(key) {
   } catch(e) {}
 }
 
-/* ===== 7. GUARDADO CON VALIDACIONES Y LÓGICA SEG_* ===== */
+/* ===== 7. GUARDADO CON VALIDACIONES Y DUPLICADOS ===== */
 async function save() {
+  const errDiv = document.getElementById("form-error");
+  if(errDiv) errDiv.style.display = "none";
+
   const key = currentEntityKey, attrs = {};
   const isUpdate = !!editingRow && !window.isDuplicating;
   const isDuplicate = window.isDuplicating;
@@ -910,8 +909,14 @@ async function save() {
     attrs[el.getAttribute("data-field")] = v; 
   });
 
-  if (PARENT_RULES[key] && !attrs[PARENT_RULES[key].fk]) throw new Error("Debe seleccionar el nivel superior (padre) antes de guardar.");
-  if(formDyn.querySelector("[data-invalid='1']")) throw new Error("El peso total excede el 100%.");
+  if (PARENT_RULES[key] && !attrs[PARENT_RULES[key].fk]) {
+      showFormError("Debe seleccionar el nivel superior (padre) antes de guardar.");
+      throw new Error("Validation Error");
+  }
+  if(formDyn.querySelector("[data-invalid='1']")) {
+      showFormError("El peso total excede el 100%.");
+      throw new Error("Validation Error");
+  }
 
   if(key === "CFG_Actividad") attrs["Nombre"] = attrs["NombreActividad"];
 
@@ -920,13 +925,19 @@ async function save() {
   }
   if (key === "SEG_Asignacion") {
       const vig = attrs["Vigencia"] || document.getElementById("sel-vigencia").value;
-      if (!attrs["PersonaGlobalID"] || !attrs["TareaGlobalID"] || !vig) throw new Error("Debe seleccionar Persona, Tarea y Vigencia.");
+      if (!attrs["PersonaGlobalID"] || !attrs["TareaGlobalID"] || !vig) {
+          showFormError("Debe seleccionar Persona, Tarea y Vigencia.");
+          throw new Error("Validation Error");
+      }
       attrs["ClaveUnicaAsignacion"] = `${attrs["PersonaGlobalID"]}|${attrs["TareaGlobalID"]}|${vig}`;
   }
   if (key === "SEG_Alcance") {
       const nivel = attrs["NivelJerarquia"];
       const selObjVal = document.getElementById("sel-alcance-objeto")?.value;
-      if (!nivel || !selObjVal) throw new Error("Debe seleccionar el Nivel y el Objeto de alcance.");
+      if (!nivel || !selObjVal) {
+          showFormError("Debe seleccionar el Nivel y el Objeto de alcance.");
+          throw new Error("Validation Error");
+      }
       attrs["ObjetoGlobalID"] = selObjVal;
       let catKey = "CFG_" + nivel.charAt(0).toUpperCase() + nivel.slice(1).toLowerCase();
       if(nivel.toUpperCase() === "SUBACTIVIDAD") catKey = "CFG_SubActividad";
@@ -944,10 +955,14 @@ async function save() {
           if (!selGid) {
               const inputEl = document.getElementById(`sel-${pConf.guidF}`);
               if(inputEl) { inputEl.classList.add("field-error"); inputEl.focus(); }
-              throw new Error(`Debe seleccionar una opción válida para ${pConf.textF} de la lista.`);
+              showFormError(`Debe seleccionar una opción válida para ${pConf.textF} de la lista.`);
+              throw new Error("Validation Error");
           }
           const personObj = catalogs["SEG_Persona"]?.find(p => p.GlobalID === selGid);
-          if (!personObj) throw new Error(`La persona seleccionada no pudo resolverse en el catálogo.`);
+          if (!personObj) {
+              showFormError(`La persona seleccionada no pudo resolverse en el catálogo.`);
+              throw new Error("Validation Error");
+          }
           attrs[pConf.textF] = personObj.Nombre;
       }
   }
@@ -956,7 +971,8 @@ async function save() {
       const t1 = Number(attrs["TopeAcumT1"]) || 0; const t2 = Number(attrs["TopeAcumT2"]) || 0;
       const t3 = Number(attrs["TopeAcumT3"]) || 0; const t4 = Number(attrs["TopeAcumT4"]) || 0;
       if (!(t1 >= 0 && t1 <= t2 && t2 <= t3 && t3 <= t4 && t4 <= 100)) {
-          throw new Error("Los topes acumulados deben ser numéricos, crecientes y no superar 100%. Revise los valores de Máximo T1, T2, T3 y T4.");
+          showFormError("Los topes acumulados deben ser numéricos, crecientes y no superar 100%. Revise los valores de Máximo T1, T2, T3 y T4.");
+          throw new Error("Validation Error");
       }
   }
 
@@ -978,7 +994,10 @@ async function save() {
                   const pAttrs = planRes.features[0].attributes;
                   if (pAttrs.AplicaTopeAcumulado === "SI" || pAttrs.AplicaTopeAcumulado === "Si") {
                       const maxVal = Number(pAttrs[`TopeAcum${mappedPer}`]);
-                      if (!isNaN(maxVal) && valor > maxVal) throw new Error(`Esta tarea tiene tope acumulado para ${mappedPer}. El máximo permitido es ${maxVal}%.`);
+                      if (!isNaN(maxVal) && valor > maxVal) {
+                          showFormError(`Esta tarea tiene tope acumulado para ${mappedPer}. El máximo permitido es ${maxVal}%.`);
+                          throw new Error("Validation Error");
+                      }
                   }
               }
           }
@@ -999,14 +1018,12 @@ async function save() {
           const inputEl = formDyn.querySelector(`[data-field="${uniqueField}"]`);
           if(inputEl) { inputEl.classList.add("field-error"); inputEl.focus(); }
           
-          let errMsg = `No se puede guardar: Ya existe un registro con el código '${codeVal}'`;
+          let errMsg = `Ya existe un registro con este identificador.`;
           if (key === "SEG_Asignacion") errMsg = "Ya existe una asignación para esta persona, tarea y vigencia.";
-          else if (!key.startsWith("CFG_") && attrs.Vigencia) errMsg += ` para la vigencia ${attrs.Vigencia}`;
-          errMsg += isDuplicate ? " (Debe cambiar el código al duplicar)." : ".";
+          else if (!key.startsWith("CFG_") && attrs.Vigencia) errMsg = `Ya existe un registro con este identificador para la vigencia ${attrs.Vigencia}.`;
           
-          const errDiv = document.getElementById("form-error");
-          if(errDiv) { errDiv.textContent = errMsg; errDiv.style.display = "block"; }
-          throw new Error(errMsg);
+          showFormError(errMsg);
+          throw new Error("Validation Error");
       }
   }
 
@@ -1017,10 +1034,9 @@ async function save() {
           const dupWherePlan = `${fkField} = '${fkVal}' AND Vigencia = ${vigVal}`;
           const dupCheckPlan = await fetchJson(`${entityUrl(key)}/query`, { f: "json", where: dupWherePlan, outFields: "OBJECTID", returnGeometry: false });
           if (dupCheckPlan.features && dupCheckPlan.features.length > 0) {
-              const errMsg = `No se puede guardar: Ya existe un registro para la combinación Padre + Vigencia (${vigVal}). Si está duplicando, seleccione otra vigencia u otro padre.`;
-              const errDiv = document.getElementById("form-error");
-              if(errDiv) { errDiv.textContent = errMsg; errDiv.style.display = "block"; }
-              throw new Error(errMsg);
+              const errMsg = "No se puede guardar porque el registro ya existe para esta combinación de Padre y Vigencia.";
+              showFormError(errMsg);
+              throw new Error("Validation Error");
           }
       }
   }
@@ -1063,7 +1079,15 @@ async function save() {
 
 document.getElementById("btn-save").addEventListener("click", async () => {
   const btn = document.getElementById("btn-save"); const originalText = btn.textContent;
-  try { btn.disabled = true; btn.textContent = "Guardando... ⏳"; setStatus("Verificando datos y enviando...", "info"); await save(); setStatus("Guardado con éxito.", "success"); } catch(e) { setStatus(e.message, "error"); } finally { btn.disabled = false; btn.textContent = originalText; }
+  try { 
+      btn.disabled = true; btn.textContent = "Guardando... ⏳"; setStatus("Verificando datos y enviando...", "info"); 
+      await save(); 
+      setStatus("Guardado con éxito.", "success"); 
+  } catch(e) { 
+      if (e.message !== "Validation Error") setStatus(e.message, "error"); 
+  } finally { 
+      btn.disabled = false; btn.textContent = originalText; 
+  }
 });
 
 /* ===== 8. EVENTOS Y CLONACIÓN ===== */
