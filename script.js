@@ -1,7 +1,7 @@
 /* ===========================================================
    DATA-PAC | Admin OAP V3 (script.js)
    - OTP Auth, RBAC, Auditoría, Personas Genéricas, Duplicar
-   - MEJORA: Clonación Restringida, Topes PLAN_TareaVigencia reales
+   - MEJORA: Aislamiento CFG_* (Contexto PAC) vs PLAN_* (Contexto Vigencia)
    =========================================================== */
 
 const SERVICE_URL = "https://services6.arcgis.com/yq6pe3Lw2oWFjWtF/arcgis/rest/services/DATAPAC_V3/FeatureServer";
@@ -163,20 +163,14 @@ document.getElementById("btn-back-otp").addEventListener("click", () => {
   document.getElementById("otp-step-2").classList.add("is-hidden"); document.getElementById("otp-step-1").classList.remove("is-hidden"); setStatus("", "info", true);
 });
 
-/* ===== 2. CARGA DE SESIÓN Y CATÁLOGOS ===== */
+/* ===== 2. CARGA DE SESIÓN, CATÁLOGOS Y CONTEXTO PAC ===== */
 async function initSession() {
   setStatus("Cargando perfil...", "info", true);
   try {
     const resR = await fetchJson(entityUrl("SEG_PersonaRol") + "/query", { f: "json", where: `PersonaID='${SESSION.personaID}' AND Activo='SI'`, outFields: "RolID", returnGeometry: false });
-    
-    // DEPURACIÓN Y NORMALIZACIÓN DE ROL: Extracción limpia en mayúsculas
     SESSION.roles = (resR.features || []).map(f => String(f.attributes.RolID).trim().toUpperCase());
     if(SESSION.roles.some(r => r === "SUPERADMIN")) SESSION.isSuperAdmin = true;
     if(SESSION.roles.length === 1 && SESSION.roles[0] === "VISUALIZADOR") SESSION.isVisualizador = true;
-
-    console.log("--- Validación de Permisos ---");
-    console.log("Roles del usuario:", SESSION.roles);
-    console.log("¿Es SuperAdmin?:", SESSION.isSuperAdmin);
 
     const resA = await fetchJson(entityUrl("SEG_Alcance") + "/query", { f: "json", where: `PersonaID='${SESSION.personaID}' AND Activo='SI'`, outFields: "NivelJerarquia,ObjetoGlobalID,Permiso", returnGeometry: false });
     const alcances = (resA.features || []).map(f => f.attributes);
@@ -190,11 +184,10 @@ async function initSession() {
     
     if(!SESSION.isSuperAdmin) await resolveHierarchy(alcances);
 
-    await loadCatalogs();
+    await loadCatalogs(true);
     document.getElementById("otp-overlay").style.display = "none"; uiApp.style.display = "flex";
     document.getElementById("pill-user").textContent = `Usuario: ${SESSION.nombre} (${SESSION.roles.join(", ")})`;
     
-    // FORZAR VISIBILIDAD DE CLONAR (Solo SuperAdmin)
     const btnClone = document.getElementById("btn-open-clone");
     if (btnClone) {
         btnClone.style.display = SESSION.isSuperAdmin ? "inline-flex" : "none";
@@ -257,24 +250,42 @@ function buildEntityLabel(entityKey, item) {
     }
 }
 
-async function loadCatalogs() {
-  const v = document.getElementById("sel-vigencia").value; const vigW = v ? `Vigencia=${v}` : "1=1";
+// CORRECCIÓN: Los catálogos de CFG_ y SEG_ no se filtran por vigencia. Son base estructural.
+async function loadCatalogs(forceBase = false) {
+  const vig = document.getElementById("sel-vigencia").value; 
+  const vigW = vig ? `Vigencia=${vig}` : "1=1";
+  
   async function fetchCat(k, nameF, extra=""){
-    const w = (metaCache[k]?.fieldsByName?.["Vigencia"]) ? vigW : "1=1";
+    const isStruct = k.startsWith("CFG_") || k.startsWith("SEG_");
+    if (!forceBase && isStruct && catalogs[k] && catalogs[k].length > 0) return; 
+    
+    const w = (!isStruct && metaCache[k]?.fieldsByName?.["Vigencia"]) ? vigW : "1=1";
     const r = await fetchJson(`${entityUrl(k)}/query`, { f: "json", where: w, outFields: `GlobalID,${nameF}${extra}`, orderByFields: `${nameF} ASC`, returnGeometry: false });
     catalogs[k] = (r.features || []).map(f => f.attributes);
   }
   
   if(!metaCache["CFG_PAC"]) { for(let k of Object.keys(FK_MAPPING)) await getMeta(FK_MAPPING[k]); }
   
-  await fetchCat("CFG_PAC", "Nombre", ",PACID"); await fetchCat("CFG_Linea", "Nombre", ",LineaID");
-  await fetchCat("CFG_Programa", "Nombre", ",ProgramaID"); await fetchCat("CFG_Proyecto", "Nombre", ",ProyectoID");
-  await fetchCat("CFG_Objetivo", "Nombre", ",ObjetivoID"); await fetchCat("CFG_Actividad", "NombreActividad", ",ActividadID,Nombre");
-  await fetchCat("CFG_SubActividad", "NombreSubActividad", ",CodigoSubActividad"); await fetchCat("CFG_Tarea", "NombreTarea", ",CodigoTarea");
+  await fetchCat("CFG_PAC", "Nombre", ",PACID,Activo"); await fetchCat("CFG_Linea", "Nombre", ",LineaID,PACGlobalID");
+  await fetchCat("CFG_Programa", "Nombre", ",ProgramaID,LineaGlobalID"); await fetchCat("CFG_Proyecto", "Nombre", ",ProyectoID,ProgramaGlobalID");
+  await fetchCat("CFG_Objetivo", "Nombre", ",ObjetivoID,ProyectoGlobalID"); await fetchCat("CFG_Actividad", "NombreActividad", ",ActividadID,Nombre,ObjetivoGlobalID");
+  await fetchCat("CFG_SubActividad", "NombreSubActividad", ",CodigoSubActividad,ActividadGlobalID"); await fetchCat("CFG_Tarea", "NombreTarea", ",CodigoTarea,SubActividadGlobalID");
   await fetchCat("SEG_Persona", "Nombre", ",Cedula,Correo,PersonaID"); await fetchCat("SEG_Rol", "NombreRol", ",RolID");
+
+  if (forceBase) {
+      const selPac = document.getElementById("sel-pac");
+      const currentPac = selPac.value;
+      selPac.innerHTML = catalogs["CFG_PAC"].map(p => `<option value="${esc(p.GlobalID)}">${esc(p.PACID)} - ${esc(p.Nombre)}</option>`).join("");
+      if (currentPac && catalogs["CFG_PAC"].some(p => p.GlobalID === currentPac)) {
+          selPac.value = currentPac;
+      } else if (catalogs["CFG_PAC"].length > 0) {
+          const activePac = catalogs["CFG_PAC"].find(p => p.Activo === 'SI' || p.Activo === 'Si');
+          selPac.value = activePac ? activePac.GlobalID : catalogs["CFG_PAC"][0].GlobalID;
+      }
+  }
 }
 
-/* ===== 3. MENÚ DINÁMICO & SEGURIDAD ===== */
+/* ===== 3. MENÚ DINÁMICO & CONTEXTO PAC ===== */
 function buildDynamicMenu() {
   const nav = document.getElementById("navlist"); nav.innerHTML = "";
   const groups = [ { label: "Configuración Base", prefix: "CFG_" }, { label: "Planeación", prefix: "PLAN_" }, { label: "Reportes Operativos", prefix: "REP_" }, { label: "Aprobaciones", prefix: "WF_" }, { label: "Analítica y Finanzas", prefixes: ["BI_", "FIN_"] }, { label: "Seguridad y Auditoría", prefixes: ["SEG_", "AUD_"] } ];
@@ -305,9 +316,68 @@ function hasWritePermission(key) {
   if(SESSION.tablePermissions[key] === "Ver" || SESSION.maxPerm === "Ver") return false; return true;
 }
 
+// NUEVO: Algoritmo Traza-Jerarquía para filtrar por PAC seleccionado
+function getGuidsInPac(entityKey, pacGid) {
+    if (!pacGid) return [];
+    if (entityKey === "CFG_PAC") return [pacGid];
+    const lineas = catalogs["CFG_Linea"].filter(x => x.PACGlobalID === pacGid).map(x => x.GlobalID);
+    if (entityKey === "CFG_Linea") return lineas;
+    const programas = catalogs["CFG_Programa"].filter(x => lineas.includes(x.LineaGlobalID)).map(x => x.GlobalID);
+    if (entityKey === "CFG_Programa") return programas;
+    const proyectos = catalogs["CFG_Proyecto"].filter(x => programas.includes(x.ProgramaGlobalID)).map(x => x.GlobalID);
+    if (entityKey === "CFG_Proyecto") return proyectos;
+    const objetivos = catalogs["CFG_Objetivo"].filter(x => proyectos.includes(x.ProyectoGlobalID)).map(x => x.GlobalID);
+    if (entityKey === "CFG_Objetivo") return objetivos;
+    const actividades = catalogs["CFG_Actividad"].filter(x => objetivos.includes(x.ObjetivoGlobalID)).map(x => x.GlobalID);
+    if (entityKey === "CFG_Actividad" || entityKey === "REP_ReporteNarrativo") return actividades;
+    const subactividades = catalogs["CFG_SubActividad"].filter(x => actividades.includes(x.ActividadGlobalID)).map(x => x.GlobalID);
+    if (entityKey === "CFG_SubActividad" || entityKey === "PLAN_SubActividadVigencia") return subactividades;
+    const tareas = catalogs["CFG_Tarea"].filter(x => subactividades.includes(x.SubActividadGlobalID)).map(x => x.GlobalID);
+    if (entityKey === "CFG_Tarea" || entityKey === "PLAN_TareaVigencia" || entityKey === "REP_AvanceTarea") return tareas;
+    return null; // No aplica filtro jerárquico de PAC
+}
+
+function getPacWhere(entityKey, pacGid) {
+   if (!pacGid) return "1=0"; 
+   const guids = getGuidsInPac(entityKey, pacGid);
+   if (guids === null) return "1=1"; 
+   if (guids.length === 0) return "1=0"; 
+   
+   let fkField = "GlobalID";
+   if (entityKey === "PLAN_SubActividadVigencia") fkField = "SubActividadGlobalID";
+   if (entityKey === "PLAN_TareaVigencia" || entityKey === "REP_AvanceTarea") fkField = "TareaGlobalID";
+   if (entityKey === "REP_ReporteNarrativo") fkField = "ActividadGlobalID";
+   
+   // Si hay demasiados GUIDs, AGOL requiere cortarlos, pero en un PAC normal < 500 está bien.
+   if (guids.length <= 500) {
+       return `${fkField} IN (${guids.map(g => `'${g}'`).join(",")})`;
+   } else {
+       const chunks = [];
+       for(let i=0; i<guids.length; i+=500) {
+           chunks.push(`${fkField} IN (${guids.slice(i, i+500).map(g => `'${g}'`).join(",")})`);
+       }
+       return `(${chunks.join(" OR ")})`;
+   }
+}
+
 function buildSecurityWhere(key) {
-  let w = "1=1", vig = document.getElementById("sel-vigencia").value;
-  if(vig && metaCache[key]?.fieldsByName?.["Vigencia"]) w += ` AND Vigencia = ${vig}`;
+  let w = "1=1";
+  
+  const isCfg = key.startsWith("CFG_");
+  const isPlanOrRep = key.startsWith("PLAN_") || key.startsWith("REP_") || key.startsWith("FIN_") || key.startsWith("BI_") || key.startsWith("WF_");
+  
+  const pacGid = document.getElementById("sel-pac").value;
+  if (pacGid && (isCfg || isPlanOrRep)) {
+      const pacWhere = getPacWhere(key, pacGid);
+      if (pacWhere !== "1=1") w += ` AND ${pacWhere}`;
+  }
+
+  // CFG_ no se filtra automáticamente por Vigencia anual.
+  const vig = document.getElementById("sel-vigencia").value;
+  if (!isCfg && vig && metaCache[key]?.fieldsByName?.["Vigencia"]) {
+      w += ` AND Vigencia = ${vig}`;
+  }
+
   if(SESSION.isSuperAdmin) return w;
   
   if(SESSION.allowedGuids[key]) {
@@ -363,7 +433,14 @@ async function loadEntity(key, clearSearch = false) {
   
   currentEntityKey = key; 
   document.querySelectorAll(".navitem").forEach(b => { b.classList.toggle("is-active", b.textContent.includes(key)); });
+  
+  const isCfg = key.startsWith("CFG_");
+  const pacSel = document.getElementById("sel-pac");
+  const pacName = pacSel.options[pacSel.selectedIndex]?.text || "PAC";
+  const vig = document.getElementById("sel-vigencia").value || "Todas";
+  
   document.getElementById("h-entity").textContent = key;
+  document.getElementById("p-entity").textContent = isCfg ? `Estructura base de ${pacName}` : `Planeación/Operación en ${vig} para ${pacName}`;
   document.getElementById("btn-new").style.display = (hasWritePermission(key) && !key.startsWith("WF_")) ? "inline-flex" : "none";
   
   setStatus("Cargando datos..."); 
@@ -462,7 +539,9 @@ window.confirmDelete = async function(oid) {
     await writeAuditEvent("DELETE", key, parentGid, "OK", "Registro eliminado exitosamente.");
     await writeAuditHistory(key, oid, parentGid, "__DELETE__", serializeAuditRecord(row.attributes), "", "Borrado de interfaz Admin");
 
-    await loadCatalogs(); await loadEntity(key, false); setStatus("Registro eliminado exitosamente.", "success");
+    // CFG_ no se refiltra por vigencia anual, recarga suave.
+    if(key.startsWith("CFG_")) await loadCatalogs(true); 
+    await loadEntity(key, false); setStatus("Registro eliminado exitosamente.", "success");
   } catch(e) {
     if (!e.message.includes("Dependencias encontradas")) {
         await writeAuditEvent("DELETE", key, parentGid, "ERROR", e.message);
@@ -612,6 +691,7 @@ function openModalForm(oid = null, isDuplicate = false) {
     checkWeight(key);
   }
 
+  // Visibilidad condicional exclusiva de Topes para PLAN_TareaVigencia
   if (key === "PLAN_TareaVigencia") {
       const elAplica = formDyn.querySelector('[data-field="AplicaTopeAcumulado"]');
       const toggleTopes = () => {
@@ -643,8 +723,10 @@ async function checkWeight(key) {
       helper.textContent = "Selecciona el padre primero."; helper.style.color="var(--muted)"; return; 
   }
   
+  // CFG_ no aplica Vigencia en su peso funcional estructural
   const v = document.getElementById("sel-vigencia").value;
-  const w = `${rule.fk}='${pSel.value}'` + (v && metaCache[key].fieldsByName["Vigencia"] ? ` AND Vigencia=${v}` : "");
+  let w = `${rule.fk}='${pSel.value}'`;
+  if (!key.startsWith("CFG_") && v && metaCache[key].fieldsByName["Vigencia"]) w += ` AND Vigencia=${v}`;
   
   try {
     const r = await fetchJson(`${entityUrl(key)}/query`, { f: "json", where: w, outFields: `OBJECTID,${rule.weight}`, returnGeometry: false });
@@ -658,7 +740,7 @@ async function checkWeight(key) {
   } catch(e) {}
 }
 
-/* ===== 7. GUARDADO CON VALIDACIONES (TOPES Y DUPLICADOS) ===== */
+/* ===== 7. GUARDADO CON VALIDACIONES (TOPES, DUPLICADOS Y AUDITORÍA) ===== */
 async function save() {
   const key = currentEntityKey, attrs = {};
   const isUpdate = !!editingRow && !window.isDuplicating;
@@ -739,7 +821,8 @@ async function save() {
       const isStr = fMeta && fMeta.type === "esriFieldTypeString";
       
       let dupWhere = `${uniqueField} = ${isStr ? `'${codeVal}'` : codeVal}`;
-      if (attrs.Vigencia && metaCache[key].fieldsByName["Vigencia"]) dupWhere += ` AND Vigencia = ${attrs.Vigencia}`;
+      // CFG no se filtra por Vigencia para la regla de duplicados (es llave funcional única)
+      if (!key.startsWith("CFG_") && attrs.Vigencia && metaCache[key].fieldsByName["Vigencia"]) dupWhere += ` AND Vigencia = ${attrs.Vigencia}`;
       if (isUpdate) dupWhere += ` AND OBJECTID <> ${originalAttrs.OBJECTID}`;
       
       const dupCheck = await fetchJson(`${entityUrl(key)}/query`, { f: "json", where: dupWhere, outFields: "OBJECTID", returnGeometry: false });
@@ -747,7 +830,7 @@ async function save() {
           const inputEl = formDyn.querySelector(`[data-field="${uniqueField}"]`);
           if(inputEl) { inputEl.classList.add("field-error"); inputEl.focus(); }
           let errMsg = `No se puede guardar: Ya existe un registro con el código '${codeVal}'`;
-          if (attrs.Vigencia) errMsg += ` para la vigencia ${attrs.Vigencia}`;
+          if (!key.startsWith("CFG_") && attrs.Vigencia) errMsg += ` para la vigencia ${attrs.Vigencia}`;
           errMsg += isDuplicate ? " (Debe cambiar el código al duplicar)." : ".";
           throw new Error(errMsg);
       }
@@ -794,7 +877,8 @@ async function save() {
       }
 
       document.getElementById("modal").classList.remove("is-open");
-      await loadCatalogs(); await loadEntity(key, false);
+      if(key.startsWith("CFG_")) await loadCatalogs(true); 
+      await loadEntity(key, false);
   } catch (err) {
       await writeAuditEvent(isUpdate ? "UPDATE" : "CREATE", key, isUpdate ? originalAttrs.GlobalID : attrs.GlobalID, "ERROR", err.message); throw err;
   }
@@ -805,50 +889,19 @@ document.getElementById("btn-save").addEventListener("click", async () => {
   try { btn.disabled = true; btn.textContent = "Guardando... ⏳"; setStatus("Verificando datos y enviando...", "info"); await save(); setStatus("Guardado con éxito.", "success"); } catch(e) { setStatus(e.message, "error"); } finally { btn.disabled = false; btn.textContent = originalText; }
 });
 
-/* ===== 8. BORRADO DESDE MODAL ===== */
-document.getElementById("btn-delete").addEventListener("click", async () => {
-  const key = currentEntityKey; if(!editingRow || !canDelete()) return;
-  if (!confirm(`¿Estás seguro de que deseas eliminar este registro de ${key}? Esta acción es irreversible.`)) return;
-
-  const btn = document.getElementById("btn-delete"); btn.disabled = true; btn.textContent = "Eliminando... ⏳"; setStatus("Verificando dependencias...", "info");
-  const parentGid = editingRow.attributes.GlobalID, oid = editingRow.attributes.OBJECTID;
-  
-  try {
-    if(parentGid) {
-      for(let r of CHILDREN_RULES.filter(x => x.parent === key)) {
-        const check = await fetchJson(`${entityUrl(r.child)}/query`, { f: "json", where: `${r.fk}='${parentGid}'`, outFields: "OBJECTID", returnGeometry: false });
-        if(check.features?.length > 0) {
-            await writeAuditEvent("DELETE_BLOCKED", key, parentGid, "BLOCKED", `Dependencias en ${r.child}`);
-            alert(`⚠️ NO SE PUEDE ELIMINAR:\nEste registro tiene elementos hijos en la tabla [${r.child}].\n\nDebes eliminar primero los hijos vinculados.`); throw new Error(`Dependencias encontradas en ${r.child}.`);
-        }
-      }
-    }
-    const res = await postForm(`${entityUrl(key)}/applyEdits`, { deletes: String(oid) });
-    if(res.error) throw new Error(res.error.message || "Error al eliminar");
-    if(res.deleteResults && res.deleteResults.length > 0 && !res.deleteResults[0].success) throw new Error(`Error al eliminar: ${res.deleteResults[0].error?.description || "Desconocido"}`);
-    
-    await writeAuditEvent("DELETE", key, parentGid, "OK", "Registro eliminado.");
-    await writeAuditHistory(key, oid, parentGid, "__DELETE__", serializeAuditRecord(editingRow.attributes), "", "");
-
-    document.getElementById("modal").classList.remove("is-open"); await loadCatalogs(); await loadEntity(key, false); setStatus("Registro eliminado exitosamente.", "success");
-  } catch(e) { 
-    if (!e.message.includes("Dependencias encontradas")) await writeAuditEvent("DELETE", key, parentGid, "ERROR", e.message);
-    setStatus(e.message, "error"); 
-  } finally { btn.disabled = false; btn.textContent = "Eliminar"; }
-});
-
-/* ===== 9. EVENTOS Y CLONACIÓN ===== */
+/* ===== 8. EVENTOS Y CLONACIÓN ===== */
 document.getElementById("btn-close").addEventListener("click", () => document.getElementById("modal").classList.remove("is-open"));
 document.getElementById("btn-reload").addEventListener("click", () => loadEntity(currentEntityKey, false));
 document.getElementById("btn-new").addEventListener("click", () => openModalForm(null, false));
 document.getElementById("sel-vigencia").addEventListener("change", async () => { await loadCatalogs(); if(currentEntityKey) await loadEntity(currentEntityKey, false); });
+document.getElementById("sel-pac").addEventListener("change", async () => { await loadCatalogs(); if(currentEntityKey) await loadEntity(currentEntityKey, false); });
 
 let tOut; 
 document.getElementById("txt-search").addEventListener("input", () => { 
     clearTimeout(tOut); tOut = setTimeout(() => { if(currentEntityKey) loadEntity(currentEntityKey, false); }, 350); 
 });
 
-/* Asignación Defensiva del Botón Clonar */
+/* Lógica del Modal de Clonación Segura */
 const btnOpenClone = document.getElementById("btn-open-clone");
 if (btnOpenClone) {
     btnOpenClone.addEventListener("click", () => {
@@ -870,6 +923,7 @@ if (btnExecClone) {
         
         const origen = document.getElementById("sel-clone-origen").value;
         const destino = document.getElementById("sel-clone-destino").value;
+        const pacGid = document.getElementById("sel-pac").value;
         
         if(!origen || !destino) return alert("Debe seleccionar vigencia origen y destino.");
         if(origen === destino) return alert("El origen y el destino no pueden ser iguales.");
@@ -885,8 +939,8 @@ if (btnExecClone) {
         setStatus(`Iniciando clonación de ${origen} a ${destino}...`, "info");
         
         try {
-            const resSub = await processClone("PLAN_SubActividadVigencia", origen, destino, "SubActividadGlobalID");
-            const resTar = await processClone("PLAN_TareaVigencia", origen, destino, "TareaGlobalID");
+            const resSub = await processClone("PLAN_SubActividadVigencia", origen, destino, "SubActividadGlobalID", pacGid);
+            const resTar = await processClone("PLAN_TareaVigencia", origen, destino, "TareaGlobalID", pacGid);
             
             const msg = `Clonación finalizada:\n\n- PLAN_SubActividadVigencia: ${resSub.created} creados, ${resSub.skipped} omitidos, ${resSub.errors} errores\n- PLAN_TareaVigencia: ${resTar.created} creados, ${resTar.skipped} omitidos, ${resTar.errors} errores`;
             
@@ -907,12 +961,17 @@ if (btnExecClone) {
     });
 }
 
-async function processClone(entityKey, origen, destino, fkField) {
+async function processClone(entityKey, origen, destino, fkField, pacGid) {
     const result = { created: 0, skipped: 0, errors: 0 };
     
-    // outFields="*" garantiza que todos los campos nuevos (como AplicaTopeAcumulado, etc.) se capturen
     const sourceRes = await fetchJson(`${entityUrl(entityKey)}/query`, { f:"json", where:`Vigencia=${origen}`, outFields:"*", returnGeometry:false });
-    const sourceRows = sourceRes.features || [];
+    let sourceRows = sourceRes.features || [];
+    if(sourceRows.length === 0) return result;
+    
+    const validGuids = getGuidsInPac(entityKey, pacGid);
+    if (validGuids !== null) {
+        sourceRows = sourceRows.filter(r => validGuids.includes(r.attributes[fkField]));
+    }
     if(sourceRows.length === 0) return result;
     
     const targetRes = await fetchJson(`${entityUrl(entityKey)}/query`, { f:"json", where:`Vigencia=${destino}`, outFields:fkField, returnGeometry:false });

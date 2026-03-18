@@ -77,6 +77,10 @@
             <p class="muted" id="p-entity">El sistema aplicará tus permisos funcionales.</p>
           </div>
           <div class="toolbar">
+            <select id="sel-pac" class="sel-small" title="PAC Seleccionado" style="width: 260px;">
+              <option value="">Cargando PAC...</option>
+            </select>
+            
             <input class="inp-search" id="txt-search" type="search" placeholder="Buscar por código o nombre…" />
             <select id="sel-vigencia" class="sel-small" title="Vigencia">
               <option value="">Vigencia: Todas</option>
@@ -131,7 +135,7 @@
           <button class="btn btn--ghost" id="btn-close-clone">Cerrar</button>
         </div>
         <div class="modal__body">
-          <p class="muted" style="margin-bottom: 16px;">Selecciona la vigencia desde la cual deseas copiar la planeación y la nueva vigencia a generar.</p>
+          <p class="muted" style="margin-bottom: 16px;">Selecciona la vigencia desde la cual deseas copiar la planeación y la nueva vigencia a generar para el PAC activo.</p>
           <div class="formgrid" style="grid-template-columns: 1fr;">
             <div class="field">
               <label>Vigencia Origen (Desde)</label>
@@ -153,7 +157,7 @@
             </div>
           </div>
           <div style="margin-top: 20px; padding: 12px; background: #fff5f5; border: 1px solid #fed7d7; border-radius: 8px; font-size: 12px; color: #991b1b;">
-            <strong>⚠️ Atención:</strong> Este proceso copiará exclusivamente las tablas <b>PLAN_SubActividadVigencia</b> y <b>PLAN_TareaVigencia</b> (incluyendo topes). No duplicará registros que ya existan en la vigencia destino.
+            <strong>⚠️ Atención:</strong> Este proceso copiará exclusivamente las tablas <b>PLAN_SubActividadVigencia</b> y <b>PLAN_TareaVigencia</b> (incluyendo topes acumulados) para el PAC actualmente seleccionado. No duplicará registros que ya existan.
           </div>
         </div>
         <div class="modal__foot">
