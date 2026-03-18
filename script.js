@@ -1,7 +1,7 @@
 /* ===========================================================
    DATA-PAC | Admin OAP V3 (script.js)
    - OTP Auth, RBAC, Auditoría, Personas Genéricas, Duplicar
-   - MEJORA: Aislamiento CFG_* (Contexto PAC) vs PLAN_* (Contexto Vigencia)
+   - MEJORA: Aislamiento CFG_*, Contexto PAC, y Consultas POST robustas
    =========================================================== */
 
 const SERVICE_URL = "https://services6.arcgis.com/yq6pe3Lw2oWFjWtF/arcgis/rest/services/DATAPAC_V3/FeatureServer";
@@ -88,12 +88,30 @@ function isReadOnly(key){ return HARD_READONLY.has(key) || !hasWritePermission(k
 function canDelete(){ return SESSION.isSuperAdmin; } 
 function generateGUID() { return '{' + crypto.randomUUID().toUpperCase() + '}'; }
 
-/* ===== FETCH & POST CORE ===== */
+/* ===== FETCH & POST CORE (Estrategia POST para evitar Error 414 URI Too Long) ===== */
 async function fetchJson(url, params){
-  const u = new URL(url); Object.entries(params||{}).forEach(([k,v]) => u.searchParams.set(k,v));
-  u.searchParams.set('_ts', Date.now()); 
-  const r = await fetch(u.toString(), { method: "GET", cache: "no-store" }); 
-  if(!r.ok) throw new Error(`HTTP ${r.status}`); return await r.json();
+  params = params || {};
+  params._ts = Date.now();
+  
+  if (url.endsWith("/query")) {
+      const form = new URLSearchParams();
+      Object.entries(params).forEach(([k,v]) => {
+          if (v !== undefined && v !== null) form.append(k, v);
+      });
+      const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: form });
+      if(!r.ok) throw new Error(`HTTP ${r.status} al consultar ${url}`);
+      const json = await r.json();
+      if (json.error) throw new Error(json.error.message || "Error en base de datos AGOL");
+      return json;
+  } else {
+      const u = new URL(url);
+      Object.entries(params).forEach(([k,v]) => {
+          if (v !== undefined && v !== null) u.searchParams.set(k,v);
+      });
+      const r = await fetch(u.toString(), { method: "GET", cache: "no-store" });
+      if(!r.ok) throw new Error(`HTTP ${r.status}`);
+      return await r.json();
+  }
 }
 
 async function postForm(url, obj){
@@ -250,7 +268,6 @@ function buildEntityLabel(entityKey, item) {
     }
 }
 
-// CORRECCIÓN: Los catálogos de CFG_ y SEG_ no se filtran por vigencia. Son base estructural.
 async function loadCatalogs(forceBase = false) {
   const vig = document.getElementById("sel-vigencia").value; 
   const vigW = vig ? `Vigencia=${vig}` : "1=1";
@@ -316,7 +333,6 @@ function hasWritePermission(key) {
   if(SESSION.tablePermissions[key] === "Ver" || SESSION.maxPerm === "Ver") return false; return true;
 }
 
-// NUEVO: Algoritmo Traza-Jerarquía para filtrar por PAC seleccionado
 function getGuidsInPac(entityKey, pacGid) {
     if (!pacGid) return [];
     if (entityKey === "CFG_PAC") return [pacGid];
@@ -334,7 +350,7 @@ function getGuidsInPac(entityKey, pacGid) {
     if (entityKey === "CFG_SubActividad" || entityKey === "PLAN_SubActividadVigencia") return subactividades;
     const tareas = catalogs["CFG_Tarea"].filter(x => subactividades.includes(x.SubActividadGlobalID)).map(x => x.GlobalID);
     if (entityKey === "CFG_Tarea" || entityKey === "PLAN_TareaVigencia" || entityKey === "REP_AvanceTarea") return tareas;
-    return null; // No aplica filtro jerárquico de PAC
+    return null; 
 }
 
 function getPacWhere(entityKey, pacGid) {
@@ -348,7 +364,6 @@ function getPacWhere(entityKey, pacGid) {
    if (entityKey === "PLAN_TareaVigencia" || entityKey === "REP_AvanceTarea") fkField = "TareaGlobalID";
    if (entityKey === "REP_ReporteNarrativo") fkField = "ActividadGlobalID";
    
-   // Si hay demasiados GUIDs, AGOL requiere cortarlos, pero en un PAC normal < 500 está bien.
    if (guids.length <= 500) {
        return `${fkField} IN (${guids.map(g => `'${g}'`).join(",")})`;
    } else {
@@ -363,18 +378,17 @@ function getPacWhere(entityKey, pacGid) {
 function buildSecurityWhere(key) {
   let w = "1=1";
   
-  const isCfg = key.startsWith("CFG_");
+  const isCfg = key.startsWith("CFG_") || key.startsWith("SEG_");
   const isPlanOrRep = key.startsWith("PLAN_") || key.startsWith("REP_") || key.startsWith("FIN_") || key.startsWith("BI_") || key.startsWith("WF_");
   
   const pacGid = document.getElementById("sel-pac").value;
-  if (pacGid && (isCfg || isPlanOrRep)) {
+  if (pacGid && (isCfg || isPlanOrRep) && !key.startsWith("SEG_")) { 
       const pacWhere = getPacWhere(key, pacGid);
       if (pacWhere !== "1=1") w += ` AND ${pacWhere}`;
   }
 
-  // CFG_ no se filtra automáticamente por Vigencia anual.
   const vig = document.getElementById("sel-vigencia").value;
-  if (!isCfg && vig && metaCache[key]?.fieldsByName?.["Vigencia"]) {
+  if (!key.startsWith("CFG_") && !key.startsWith("SEG_") && vig && metaCache[key]?.fieldsByName?.["Vigencia"]) {
       w += ` AND Vigencia = ${vig}`;
   }
 
@@ -443,18 +457,27 @@ async function loadEntity(key, clearSearch = false) {
   document.getElementById("p-entity").textContent = isCfg ? `Estructura base de ${pacName}` : `Planeación/Operación en ${vig} para ${pacName}`;
   document.getElementById("btn-new").style.display = (hasWritePermission(key) && !key.startsWith("WF_")) ? "inline-flex" : "none";
   
-  setStatus("Cargando datos..."); 
-  await getMeta(key);
-  
-  const r = await fetchJson(`${entityUrl(key)}/query`, { f: "json", where: buildWhere(key), outFields: "*", returnGeometry: false });
-  currentRows = r.features || []; 
-  currentSort = { col: null, dir: 0 };
-  
-  renderTable(); 
-  
-  const st = document.getElementById("txt-search").value.trim();
-  if (currentRows.length === 0 && st) { setStatus(`Sin resultados para '${st}'.`, "info"); } 
-  else { setStatus(`Cargados ${currentRows.length} registros.`, "success"); }
+  setStatus("Cargando datos...", "info"); 
+  document.getElementById("tbl-head").innerHTML = "";
+  document.getElementById("tbl-body").innerHTML = "";
+
+  try {
+      await getMeta(key);
+      
+      const r = await fetchJson(`${entityUrl(key)}/query`, { f: "json", where: buildWhere(key), outFields: "*", returnGeometry: false });
+      currentRows = r.features || []; 
+      currentSort = { col: null, dir: 0 };
+      
+      renderTable(); 
+      
+      const st = document.getElementById("txt-search").value.trim();
+      if (currentRows.length === 0 && st) { setStatus(`Sin resultados para '${st}'.`, "info"); } 
+      else { setStatus(`Cargados ${currentRows.length} registros.`, "success"); }
+  } catch (e) {
+      console.error(`Error cargando entidad ${key}:`, e);
+      setStatus(`Error al cargar la tabla: ${e.message}`, "error");
+      document.getElementById("tbl-body").innerHTML = `<tr><td colspan="10" style="text-align:center; color:#d64545;">${esc(e.message)}</td></tr>`;
+  }
 }
 
 window.toggleSort = function(col) {
@@ -539,7 +562,6 @@ window.confirmDelete = async function(oid) {
     await writeAuditEvent("DELETE", key, parentGid, "OK", "Registro eliminado exitosamente.");
     await writeAuditHistory(key, oid, parentGid, "__DELETE__", serializeAuditRecord(row.attributes), "", "Borrado de interfaz Admin");
 
-    // CFG_ no se refiltra por vigencia anual, recarga suave.
     if(key.startsWith("CFG_")) await loadCatalogs(true); 
     await loadEntity(key, false); setStatus("Registro eliminado exitosamente.", "success");
   } catch(e) {
@@ -550,7 +572,7 @@ window.confirmDelete = async function(oid) {
   }
 };
 
-/* ===== 6. FORMULARIOS (Integración de Topes y "Duplicar") ===== */
+/* ===== 6. FORMULARIOS ===== */
 function openModalForm(oid = null, isDuplicate = false) {
   const key = currentEntityKey; 
   window.isDuplicating = isDuplicate; 
@@ -691,7 +713,6 @@ function openModalForm(oid = null, isDuplicate = false) {
     checkWeight(key);
   }
 
-  // Visibilidad condicional exclusiva de Topes para PLAN_TareaVigencia
   if (key === "PLAN_TareaVigencia") {
       const elAplica = formDyn.querySelector('[data-field="AplicaTopeAcumulado"]');
       const toggleTopes = () => {
@@ -723,7 +744,6 @@ async function checkWeight(key) {
       helper.textContent = "Selecciona el padre primero."; helper.style.color="var(--muted)"; return; 
   }
   
-  // CFG_ no aplica Vigencia en su peso funcional estructural
   const v = document.getElementById("sel-vigencia").value;
   let w = `${rule.fk}='${pSel.value}'`;
   if (!key.startsWith("CFG_") && v && metaCache[key].fieldsByName["Vigencia"]) w += ` AND Vigencia=${v}`;
@@ -821,7 +841,6 @@ async function save() {
       const isStr = fMeta && fMeta.type === "esriFieldTypeString";
       
       let dupWhere = `${uniqueField} = ${isStr ? `'${codeVal}'` : codeVal}`;
-      // CFG no se filtra por Vigencia para la regla de duplicados (es llave funcional única)
       if (!key.startsWith("CFG_") && attrs.Vigencia && metaCache[key].fieldsByName["Vigencia"]) dupWhere += ` AND Vigencia = ${attrs.Vigencia}`;
       if (isUpdate) dupWhere += ` AND OBJECTID <> ${originalAttrs.OBJECTID}`;
       
@@ -901,7 +920,7 @@ document.getElementById("txt-search").addEventListener("input", () => {
     clearTimeout(tOut); tOut = setTimeout(() => { if(currentEntityKey) loadEntity(currentEntityKey, false); }, 350); 
 });
 
-/* Lógica del Modal de Clonación Segura */
+/* Asignación Defensiva del Botón Clonar */
 const btnOpenClone = document.getElementById("btn-open-clone");
 if (btnOpenClone) {
     btnOpenClone.addEventListener("click", () => {
