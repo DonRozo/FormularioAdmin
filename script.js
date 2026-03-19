@@ -32,7 +32,7 @@ const FK_MAPPING = {
   PACGlobalID: "CFG_PAC", LineaGlobalID: "CFG_Linea", ProgramaGlobalID: "CFG_Programa",
   ProyectoGlobalID: "CFG_Proyecto", ObjetivoGlobalID: "CFG_Objetivo", ActividadGlobalID: "CFG_Actividad",
   SubActividadGlobalID: "CFG_SubActividad", TareaGlobalID: "CFG_Tarea", PersonaGlobalID: "SEG_Persona",
-  RolID: "SEG_Rol", ResponsableGlobalID: "SEG_Persona", PersonaID: "SEG_Persona" 
+  ResponsableGlobalID: "SEG_Persona", PersonaID: "SEG_Persona" 
 };
 
 const CHILDREN_RULES = [
@@ -186,13 +186,22 @@ document.getElementById("btn-back-otp").addEventListener("click", () => {
 /* ===== 2. CARGA DE SESIÓN, CATÁLOGOS Y CONTEXTO PAC ===== */
 async function initSession() {
   setStatus("Cargando perfil...", "info", true);
+  
+  SESSION.roles = [];
+  SESSION.isSuperAdmin = false;
+  SESSION.isVisualizador = false;
+  SESSION.maxPerm = "Ver";
+  SESSION.allowedGuids = {};
+  SESSION.assignedTasks = new Set();
+  SESSION.tablePermissions = {};
+
   try {
-    const resR = await fetchJson(entityUrl("SEG_PersonaRol") + "/query", { f: "json", where: `PersonaID='${SESSION.personaID}' AND Activo='SI'`, outFields: "RolID", returnGeometry: false });
+    const resR = await fetchJson(entityUrl("SEG_PersonaRol") + "/query", { f: "json", where: `(PersonaID='${SESSION.personaGlobalID}' OR PersonaID='${SESSION.personaID}') AND Activo='SI'`, outFields: "RolID", returnGeometry: false });
     SESSION.roles = (resR.features || []).map(f => String(f.attributes.RolID).trim().toUpperCase());
     if(SESSION.roles.some(r => r === "SUPERADMIN")) SESSION.isSuperAdmin = true;
     if(SESSION.roles.length === 1 && SESSION.roles[0] === "VISUALIZADOR") SESSION.isVisualizador = true;
 
-    const resA = await fetchJson(entityUrl("SEG_Alcance") + "/query", { f: "json", where: `PersonaID='${SESSION.personaID}' AND Activo='SI'`, outFields: "NivelJerarquia,ObjetoGlobalID,Permiso", returnGeometry: false });
+    const resA = await fetchJson(entityUrl("SEG_Alcance") + "/query", { f: "json", where: `(PersonaID='${SESSION.personaGlobalID}' OR PersonaID='${SESSION.personaID}') AND Activo='SI'`, outFields: "NivelJerarquia,ObjetoGlobalID,Permiso", returnGeometry: false });
     const alcances = (resA.features || []).map(f => f.attributes);
     const permWeight = {"Ver":1, "Revisar":2, "Aprobar":3, "Editar":4, "Administrar":5}; let maxW = 0;
     
@@ -225,7 +234,6 @@ async function resolveHierarchy(alcances) {
     if(SESSION.allowedGuids[k] && alc.ObjetoGlobalID) SESSION.allowedGuids[k].add(alc.ObjetoGlobalID);
   });
   
-  // Especificar outFields por tabla para no solicitar campos inexistentes
   const fieldsMap = {
     "CFG_PAC": "GlobalID",
     "CFG_Linea": "GlobalID,PACGlobalID",
@@ -238,11 +246,11 @@ async function resolveHierarchy(alcances) {
   };
   
   const arbol = {};
-  for(let c of cfgs) {
+  await Promise.all(cfgs.map(async (c) => {
     const outF = fieldsMap[c] || "GlobalID";
     const r = await fetchJson(entityUrl(c) + "/query", { f: "json", where: "1=1", outFields: outF, returnGeometry: false });
     arbol[c] = (r.features || []).map(f => f.attributes);
-  }
+  }));
   
   function propagate(pKey, cKey, fk) {
     if(SESSION.allowedGuids[pKey].size === 0) return;
