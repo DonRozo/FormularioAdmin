@@ -1,7 +1,7 @@
 /* ===========================================================
    DATA-PAC | Admin OAP V4 (script.js)
    - OTP Auth, RBAC, Auditoría, Personas Genéricas, Duplicar
-   - ACTUALIZADO A DATAPAC V4: PLAN_Actividad, BI_AvanceSubActividad, BI_AvanceTarea, Regla Aplica="No"
+   - ACTUALIZADO A DATAPAC V4: PLAN_Actividad, BI_AvanceSubActividad, BI_AvanceTarea, Reglas de Peso Aplica/Activo
    =========================================================== */
 
 const SERVICE_URL = "https://services6.arcgis.com/yq6pe3Lw2oWFjWtF/arcgis/rest/services/DATAPAC_V4/FeatureServer";
@@ -342,7 +342,6 @@ function buildDynamicMenu() {
   if(SESSION.isSuperAdmin) {
       Object.keys(ENTITY).forEach(k => vis.add(k));
   } else {
-    // CORRECCIÓN PUNTO 1: Se añadieron explícitamente BI_AvanceSubActividad y BI_AvanceTarea al listado de tablas de lectura para PUBLICADOR.
     if(SESSION.roles.includes("PUBLICADOR")) { ["WF_SolicitudRevision", "WF_AprobacionPaso", "CFG_PAC", "CFG_Linea", "BI_AvanceActividad", "BI_AvanceObjetivo", "BI_AvanceProyecto", "BI_AvancePrograma", "BI_AvanceLinea", "BI_AvancePAC", "BI_AvanceSubActividad", "BI_AvanceTarea"].forEach(t => vis.add(t)); ["CFG_Programa", "CFG_Proyecto", "CFG_Objetivo", "CFG_Actividad", "REP_AvanceTarea", "REP_ReporteNarrativo"].forEach(t => { vis.add(t); SESSION.tablePermissions[t] = "Ver"; }); }
     if(SESSION.roles.includes("APROBADOR")) Object.keys(ENTITY).filter(k => k.startsWith("CFG_") || k.startsWith("PLAN_") || k.startsWith("REP_") || k.startsWith("WF_") || k.startsWith("FIN_")).forEach(t => vis.add(t));
     if(SESSION.roles.includes("EDITOR")) { Object.keys(ENTITY).filter(k => k.startsWith("CFG_")).forEach(t => { vis.add(t); SESSION.tablePermissions[t] = "Ver"; }); ["REP_AvanceTarea", "REP_ReporteNarrativo", "WF_SolicitudRevision"].forEach(t => vis.add(t)); }
@@ -528,7 +527,6 @@ function renderTable() {
   if (PERSON_FIELDS_CONFIG[key]) { PERSON_FIELDS_CONFIG[key].forEach(c => techFields.push(c.guidF)); }
   if (key === "SEG_Asignacion") techFields.push("PersonaGlobalID", "TareaGlobalID", "ActividadID"); 
   
-  // CORRECCIÓN PUNTO 3: Se permite ver IndicadorID únicamente si se está consultando PLAN_Actividad.
   let fields = metaCache[key].fields.filter(f => 
     f.name === "OBJECTID" || (!f.name.includes("GlobalID") && !f.name.includes("Guid") && !techFields.includes(f.name) && (f.name !== "IndicadorID" || key === "PLAN_Actividad") && !(key === "CFG_Actividad" && f.name === "Nombre"))
   );
@@ -907,6 +905,40 @@ function openModalForm(oid = null, isDuplicate = false) {
       }
   }
 
+  // Regla Activo = "No" en tablas CFG_*
+  if (key.startsWith("CFG_")) {
+      const elActivo = formDyn.querySelector('[data-field="Activo"]');
+      if (elActivo) {
+          const toggleActivo = () => {
+              const isNo = (elActivo.value || "").toUpperCase() === "NO";
+              let weightField = PARENT_RULES[key]?.weight;
+              if (weightField) {
+                  const elWeight = formDyn.querySelector(`[data-field="${weightField}"]`);
+                  if (elWeight) {
+                      elWeight.disabled = isNo;
+                      if (isNo) elWeight.value = 0;
+                  }
+              }
+
+              let warningEl = document.getElementById("activo-warning");
+              if (isNo) {
+                  if (!warningEl) {
+                      const w = document.createElement("div");
+                      w.id = "activo-warning";
+                      w.style = "grid-column: 1 / -1; background: #fff3cd; color: #856404; padding: 10px; border-radius: 6px; font-size: 13px; font-weight: bold; margin-bottom: 10px;";
+                      w.textContent = "⚠️ Registro inactivo. No participará en la ponderación y su peso será 0.";
+                      formDyn.prepend(w);
+                  }
+              } else {
+                  if (warningEl) warningEl.remove();
+              }
+              if(PARENT_RULES[key]) checkWeight(key);
+          };
+          elActivo.addEventListener("change", toggleActivo);
+          setTimeout(toggleActivo, 50); // Init
+      }
+  }
+
   if (key === "SEG_Asignacion") {
       const selAct = document.getElementById("sel-synthetic-actividad");
       const selTar = formDyn.querySelector('[data-field="TareaGlobalID"]');
@@ -993,14 +1025,25 @@ async function checkWeight(key) {
   const v = document.getElementById("sel-vigencia").value;
   let w = `${rule.fk}='${pSel.value}'`;
   if (!key.startsWith("CFG_") && v && metaCache[key].fieldsByName["Vigencia"]) w += ` AND Vigencia=${v}`;
+
+  // Se determinan los campos extra para validar inactividad solo si existen en el schema actual
+  let extraFields = [];
+  if (metaCache[key].fieldsByName["Aplica"]) extraFields.push("Aplica");
+  if (metaCache[key].fieldsByName["Activo"]) extraFields.push("Activo");
+  const outFieldsStr = `OBJECTID,${rule.weight}${extraFields.length > 0 ? ',' + extraFields.join(',') : ''}`;
   
   try {
-    const r = await fetchJson(`${entityUrl(key)}/query`, { f: "json", where: w, outFields: `OBJECTID,${rule.weight},Aplica`, returnGeometry: false });
+    const r = await fetchJson(`${entityUrl(key)}/query`, { f: "json", where: w, outFields: outFieldsStr, returnGeometry: false });
     let sum = 0; const myOid = (editingRow && !window.isDuplicating) ? editingRow.attributes.OBJECTID : null;
+    
     (r.features || []).forEach(f => { 
         if(f.attributes.OBJECTID !== myOid) {
             const aplica = f.attributes.Aplica;
-            if (!aplica || String(aplica).toUpperCase() !== "NO") {
+            const activo = f.attributes.Activo;
+            const isAplicaNo = aplica && String(aplica).toUpperCase() === "NO";
+            const isActivoNo = activo && String(activo).toUpperCase() === "NO";
+
+            if (!isAplicaNo && !isActivoNo) {
                 sum += (f.attributes[rule.weight] || 0); 
             }
         }
@@ -1008,7 +1051,12 @@ async function checkWeight(key) {
     
     let current = 0;
     const elAplica = formDyn.querySelector('[data-field="Aplica"]');
-    if (!elAplica || (elAplica.value || "").toUpperCase() !== "NO") {
+    const elActivo = formDyn.querySelector('[data-field="Activo"]');
+
+    const currentAplicaNo = elAplica && (elAplica.value || "").toUpperCase() === "NO";
+    const currentActivoNo = elActivo && (elActivo.value || "").toUpperCase() === "NO";
+
+    if (!currentAplicaNo && !currentActivoNo) {
         current = Number(wInp.value) || 0;
     }
     
@@ -1016,7 +1064,7 @@ async function checkWeight(key) {
     helper.textContent = `Ocupado: ${sum.toFixed(2)}% | Total con este: ${total.toFixed(2)}%`;
     helper.style.color = total > 100 ? "#d64545" : "#15803d";
     wInp.setAttribute("data-invalid", total > 100.001 ? "1" : "0");
-  } catch(e) {}
+  } catch(e) { console.error("Error en validación de peso:", e); }
 }
 
 /* ===== 7. GUARDADO CON VALIDACIONES (TOPES, DUPLICADOS Y AUDITORÍA) ===== */
@@ -1059,8 +1107,18 @@ async function save() {
   }
 
   // Lógica Aplica="No" para tablas PLAN_*
-  if (key.startsWith("PLAN_") && attrs["Aplica"]) {
+  if (key.startsWith("PLAN_") && attrs["Aplica"] !== undefined) {
       if (String(attrs["Aplica"]).toUpperCase() === "NO") {
+          const weightField = PARENT_RULES[key]?.weight;
+          if (weightField && attrs[weightField] !== undefined) {
+              attrs[weightField] = 0;
+          }
+      }
+  }
+
+  // Lógica Activo="No" para tablas CFG_*
+  if (key.startsWith("CFG_") && attrs["Activo"] !== undefined) {
+      if (String(attrs["Activo"]).toUpperCase() === "NO") {
           const weightField = PARENT_RULES[key]?.weight;
           if (weightField && attrs[weightField] !== undefined) {
               attrs[weightField] = 0;
@@ -1339,7 +1397,6 @@ async function processClone(entityKey, origen, destino, fkField, pacGid) {
     }
     if(sourceRows.length === 0) return result;
     
-    // CORRECCIÓN PUNTO 2: Para PLAN_Actividad, se solicitan todos los campos necesarios al destino.
     let targetOutFields = fkField;
     if (entityKey === "PLAN_Actividad") {
         targetOutFields = `${fkField},IndicadorID,ClaveUnicaPlanActividad`;
