@@ -1,10 +1,10 @@
 /* ===========================================================
-   DATA-PAC | Admin OAP V3 (script.js)
+   DATA-PAC | Admin OAP V4 (script.js)
    - OTP Auth, RBAC, Auditoría, Personas Genéricas, Duplicar
-   - MEJORA FINAL: RolID con etiqueta combinada (RolID - Nombre)
+   - ACTUALIZADO A DATAPAC V4: PLAN_Actividad, BI_AvanceSubActividad, BI_AvanceTarea, Regla Aplica="No"
    =========================================================== */
 
-const SERVICE_URL = "https://services6.arcgis.com/yq6pe3Lw2oWFjWtF/arcgis/rest/services/DATAPAC_V3/FeatureServer";
+const SERVICE_URL = "https://services6.arcgis.com/yq6pe3Lw2oWFjWtF/arcgis/rest/services/DATAPAC_V4/FeatureServer";
 const URL_WEBHOOK_POWERAUTOMATE = "https://default64f30d63182749d899511db17d0949.e4.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/1123b3fd4a854b40b2b22dd45b03ca7c/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=Qz68D2G5RAq9cmMvOew1roy8bD3YQPtju4KPW2vEtvc";
 
 const ENTITY = {
@@ -13,10 +13,10 @@ const ENTITY = {
   FIN_TodoGasto: { id: 12 }, PLAN_SubActividadVigencia: { id: 13 }, PLAN_TareaVigencia: { id: 14 }, SEG_Asignacion: { id: 15 }, SEG_Persona: { id: 16 }, SEG_OTP: { id: 17 },
   FIN_ResumenTodoGastoActividad: { id: 18 }, REP_AvanceSubActividad: { id: 19 }, REP_AvanceActividad: { id: 20 }, SEG_PersonaRol: { id: 21 }, SEG_Alcance: { id: 22 }, AUD_HistorialCambio: { id: 23 },
   AUD_EventoSistema: { id: 24 }, WF_SolicitudRevision: { id: 25 }, WF_AprobacionPaso: { id: 26 }, WF_Notificacion: { id: 27 }, BI_AvanceActividad: { id: 28 }, BI_AvanceObjetivo: { id: 29 },
-  BI_AvanceProyecto: { id: 30 }, BI_AvancePrograma: { id: 31 }, BI_AvanceLinea: { id: 32 }, BI_AvancePAC: { id: 33 }
+  BI_AvanceProyecto: { id: 30 }, BI_AvancePrograma: { id: 31 }, BI_AvanceLinea: { id: 32 }, BI_AvancePAC: { id: 33 }, BI_AvanceSubActividad: { id: 34 }, BI_AvanceTarea: { id: 35 }, PLAN_Actividad: { id: 36 }
 };
 
-const HARD_READONLY = new Set(["AUD_HistorialCambio", "AUD_EventoSistema", "BI_AvanceActividad", "BI_AvanceObjetivo", "BI_AvanceProyecto", "BI_AvancePrograma", "BI_AvanceLinea", "BI_AvancePAC", "FIN_TodoGasto", "FIN_ResumenTodoGastoActividad", "REP_AvanceSubActividad", "REP_AvanceActividad", "SEG_OTP"]);
+const HARD_READONLY = new Set(["AUD_HistorialCambio", "AUD_EventoSistema", "BI_AvanceActividad", "BI_AvanceObjetivo", "BI_AvanceProyecto", "BI_AvancePrograma", "BI_AvanceLinea", "BI_AvancePAC", "BI_AvanceSubActividad", "BI_AvanceTarea", "FIN_TodoGasto", "FIN_ResumenTodoGastoActividad", "REP_AvanceSubActividad", "REP_AvanceActividad", "SEG_OTP"]);
 
 const PARENT_RULES = {
   CFG_Linea: { fk: "PACGlobalID", parent: "CFG_PAC", weight: "Peso", parentText: "PACID" },
@@ -24,6 +24,7 @@ const PARENT_RULES = {
   CFG_Proyecto: { fk: "ProgramaGlobalID", parent: "CFG_Programa", weight: "Peso", parentText: "ProgramaID" },
   CFG_Objetivo: { fk: "ProyectoGlobalID", parent: "CFG_Proyecto", weight: "Peso", parentText: "ProyectoID" },
   CFG_Actividad: { fk: "ObjetivoGlobalID", parent: "CFG_Objetivo", weight: "Peso", parentText: "ObjetivoID" },
+  PLAN_Actividad: { fk: "ActividadGlobalID", parent: "CFG_Actividad" },
   PLAN_SubActividadVigencia: { fk: "SubActividadGlobalID", parent: "CFG_SubActividad", weight: "PesoSubActividad" },
   PLAN_TareaVigencia: { fk: "TareaGlobalID", parent: "CFG_Tarea", weight: "PesoTarea" }
 };
@@ -39,6 +40,7 @@ const CHILDREN_RULES = [
   { parent: "CFG_PAC", child: "CFG_Linea", fk: "PACGlobalID" }, { parent: "CFG_Linea", child: "CFG_Programa", fk: "LineaGlobalID" },
   { parent: "CFG_Programa", child: "CFG_Proyecto", fk: "ProgramaGlobalID" }, { parent: "CFG_Proyecto", child: "CFG_Objetivo", fk: "ProyectoGlobalID" },
   { parent: "CFG_Objetivo", child: "CFG_Actividad", fk: "ObjetivoGlobalID" }, { parent: "CFG_Actividad", child: "CFG_SubActividad", fk: "ActividadGlobalID" },
+  { parent: "CFG_Actividad", child: "PLAN_Actividad", fk: "ActividadGlobalID" },
   { parent: "CFG_SubActividad", child: "CFG_Tarea", fk: "SubActividadGlobalID" }, { parent: "CFG_SubActividad", child: "PLAN_SubActividadVigencia", fk: "SubActividadGlobalID" },
   { parent: "CFG_Tarea", child: "PLAN_TareaVigencia", fk: "TareaGlobalID" }
 ];
@@ -46,7 +48,7 @@ const CHILDREN_RULES = [
 const UNIQUE_FIELDS = {
   CFG_PAC: "PACID", CFG_Linea: "LineaID", CFG_Programa: "ProgramaID", CFG_Proyecto: "ProyectoID",
   CFG_Objetivo: "ObjetivoID", CFG_Actividad: "ActividadID", CFG_SubActividad: "CodigoSubActividad", CFG_Tarea: "CodigoTarea",
-  SEG_Asignacion: "ClaveUnicaAsignacion"
+  SEG_Asignacion: "ClaveUnicaAsignacion", PLAN_Actividad: "ClaveUnicaPlanActividad"
 };
 
 const PERSON_FIELDS_CONFIG = {
@@ -60,6 +62,7 @@ const SEARCH_FIELDS = {
   CFG_Actividad: ["ActividadID", "NombreActividad", "Nombre"],
   CFG_SubActividad: ["CodigoSubActividad", "NombreSubActividad", "SiglaVariable"],
   CFG_Tarea: ["CodigoTarea", "NombreTarea"],
+  PLAN_Actividad: ["IndicadorID", "NombreIndicador", "DescripcionIndicador", "UnidadMedida"],
   PLAN_SubActividadVigencia: ["UnidadMedida", "SiglaVariable"],
   PLAN_TareaVigencia: ["UnidadMedida", "ObservacionReglaAvance"],
   SEG_Persona: ["PersonaID", "Nombre", "Cedula", "Correo", "Dependencia", "RolPrincipal"],
@@ -69,7 +72,9 @@ const SEARCH_FIELDS = {
   REP_ReporteNarrativo: ["Responsable", "TextoNarrativo", "PrincipalesLogros", "DescripcionLogrosAlcanzados"],
   AUD_HistorialCambio: ["TipoObjeto", "ObjetoGlobalID", "CampoModificado", "ValorAnterior", "ValorNuevo", "MotivoCambio", "OrigenCambio"],
   AUD_EventoSistema: ["TipoEvento", "Entidad", "Resultado", "DetalleEvento"],
-  WF_SolicitudRevision: ["EstadoActual", "ComentarioSolicitante"]
+  WF_SolicitudRevision: ["EstadoActual", "ComentarioSolicitante"],
+  BI_AvanceSubActividad: ["CodigoSubActividad", "NombreSubActividad"],
+  BI_AvanceTarea: ["CodigoTarea", "NombreTarea"]
 };
 
 /* ===== Estado ===== */
@@ -78,6 +83,12 @@ let currentEntityKey = null, currentRows = [], editingRow = null, metaCache = {}
 let currentSort = { col: null, dir: 0 }; 
 
 const uiApp = document.getElementById("app-main"), elStatus = document.getElementById("status"), elOtpStatus = document.getElementById("otp-status"), modal = document.getElementById("modal"), formDyn = document.getElementById("form-dynamic");
+
+function getDisplayAlias(f) {
+    if (f.name === "NombreSubActividad") return "Subactividad Asociada";
+    if (f.name === "Definicion") return "Descripción del registro esperado";
+    return f.alias;
+}
 
 function setStatus(msg, type="info", isOtp=false){
   const el = isOtp ? elOtpStatus : elStatus; if(!el) return;
@@ -331,7 +342,8 @@ function buildDynamicMenu() {
   if(SESSION.isSuperAdmin) {
       Object.keys(ENTITY).forEach(k => vis.add(k));
   } else {
-    if(SESSION.roles.includes("PUBLICADOR")) { ["WF_SolicitudRevision", "WF_AprobacionPaso", "CFG_PAC", "CFG_Linea", "BI_AvanceActividad", "BI_AvanceObjetivo", "BI_AvanceProyecto", "BI_AvancePrograma", "BI_AvanceLinea", "BI_AvancePAC"].forEach(t => vis.add(t)); ["CFG_Programa", "CFG_Proyecto", "CFG_Objetivo", "CFG_Actividad", "REP_AvanceTarea", "REP_ReporteNarrativo"].forEach(t => { vis.add(t); SESSION.tablePermissions[t] = "Ver"; }); }
+    // CORRECCIÓN PUNTO 1: Se añadieron explícitamente BI_AvanceSubActividad y BI_AvanceTarea al listado de tablas de lectura para PUBLICADOR.
+    if(SESSION.roles.includes("PUBLICADOR")) { ["WF_SolicitudRevision", "WF_AprobacionPaso", "CFG_PAC", "CFG_Linea", "BI_AvanceActividad", "BI_AvanceObjetivo", "BI_AvanceProyecto", "BI_AvancePrograma", "BI_AvanceLinea", "BI_AvancePAC", "BI_AvanceSubActividad", "BI_AvanceTarea"].forEach(t => vis.add(t)); ["CFG_Programa", "CFG_Proyecto", "CFG_Objetivo", "CFG_Actividad", "REP_AvanceTarea", "REP_ReporteNarrativo"].forEach(t => { vis.add(t); SESSION.tablePermissions[t] = "Ver"; }); }
     if(SESSION.roles.includes("APROBADOR")) Object.keys(ENTITY).filter(k => k.startsWith("CFG_") || k.startsWith("PLAN_") || k.startsWith("REP_") || k.startsWith("WF_") || k.startsWith("FIN_")).forEach(t => vis.add(t));
     if(SESSION.roles.includes("EDITOR")) { Object.keys(ENTITY).filter(k => k.startsWith("CFG_")).forEach(t => { vis.add(t); SESSION.tablePermissions[t] = "Ver"; }); ["REP_AvanceTarea", "REP_ReporteNarrativo", "WF_SolicitudRevision"].forEach(t => vis.add(t)); }
     if(SESSION.isVisualizador) Object.keys(ENTITY).filter(k => k.startsWith("BI_") || k.startsWith("FIN_") || k.startsWith("CFG_")).forEach(t => { vis.add(t); SESSION.tablePermissions[t] = "Ver"; });
@@ -365,11 +377,11 @@ function getGuidsInPac(entityKey, pacGid) {
     const objetivos = catalogs["CFG_Objetivo"].filter(x => proyectos.includes(x.ProyectoGlobalID)).map(x => x.GlobalID);
     if (entityKey === "CFG_Objetivo") return objetivos;
     const actividades = catalogs["CFG_Actividad"].filter(x => objetivos.includes(x.ObjetivoGlobalID)).map(x => x.GlobalID);
-    if (entityKey === "CFG_Actividad" || entityKey === "REP_ReporteNarrativo") return actividades;
+    if (entityKey === "CFG_Actividad" || entityKey === "REP_ReporteNarrativo" || entityKey === "PLAN_Actividad" || entityKey === "BI_AvanceActividad") return actividades;
     const subactividades = catalogs["CFG_SubActividad"].filter(x => actividades.includes(x.ActividadGlobalID)).map(x => x.GlobalID);
-    if (entityKey === "CFG_SubActividad" || entityKey === "PLAN_SubActividadVigencia") return subactividades;
+    if (entityKey === "CFG_SubActividad" || entityKey === "PLAN_SubActividadVigencia" || entityKey === "REP_AvanceSubActividad" || entityKey === "BI_AvanceSubActividad") return subactividades;
     const tareas = catalogs["CFG_Tarea"].filter(x => subactividades.includes(x.SubActividadGlobalID)).map(x => x.GlobalID);
-    if (entityKey === "CFG_Tarea" || entityKey === "PLAN_TareaVigencia" || entityKey === "REP_AvanceTarea") return tareas;
+    if (entityKey === "CFG_Tarea" || entityKey === "PLAN_TareaVigencia" || entityKey === "REP_AvanceTarea" || entityKey === "BI_AvanceTarea") return tareas;
     return null; 
 }
 
@@ -380,9 +392,9 @@ function getPacWhere(entityKey, pacGid) {
    if (guids.length === 0) return "1=0"; 
    
    let fkField = "GlobalID";
-   if (entityKey === "PLAN_SubActividadVigencia") fkField = "SubActividadGlobalID";
-   if (entityKey === "PLAN_TareaVigencia" || entityKey === "REP_AvanceTarea") fkField = "TareaGlobalID";
-   if (entityKey === "REP_ReporteNarrativo") fkField = "ActividadGlobalID";
+   if (entityKey === "PLAN_SubActividadVigencia" || entityKey === "BI_AvanceSubActividad") fkField = "SubActividadGlobalID";
+   if (entityKey === "PLAN_TareaVigencia" || entityKey === "REP_AvanceTarea" || entityKey === "BI_AvanceTarea") fkField = "TareaGlobalID";
+   if (entityKey === "REP_ReporteNarrativo" || entityKey === "PLAN_Actividad" || entityKey === "BI_AvanceActividad") fkField = "ActividadGlobalID";
    
    if (guids.length <= 500) {
        return `${fkField} IN (${guids.map(g => `'${g}'`).join(",")})`;
@@ -511,13 +523,14 @@ window.toggleSort = function(col) {
 
 function renderTable() {
   const key = currentEntityKey, canWrite = hasWritePermission(key), canDel = canDelete();
-  const techFields = ["CreationDate", "Creator", "EditDate", "Editor", "PersonaUltimaEdicionID", "FechaUltimaEdicionFuncional", "PersonaID", "ClaveUnicaAsignacion", "PersonaRolID", "AlcanceID"];
+  const techFields = ["CreationDate", "Creator", "EditDate", "Editor", "PersonaUltimaEdicionID", "FechaUltimaEdicionFuncional", "PersonaID", "ClaveUnicaAsignacion", "PersonaRolID", "AlcanceID", "ClaveUnicaPlanActividad"];
   
   if (PERSON_FIELDS_CONFIG[key]) { PERSON_FIELDS_CONFIG[key].forEach(c => techFields.push(c.guidF)); }
   if (key === "SEG_Asignacion") techFields.push("PersonaGlobalID", "TareaGlobalID", "ActividadID"); 
   
+  // CORRECCIÓN PUNTO 3: Se permite ver IndicadorID únicamente si se está consultando PLAN_Actividad.
   let fields = metaCache[key].fields.filter(f => 
-    f.name === "OBJECTID" || (!f.name.includes("GlobalID") && !f.name.includes("Guid") && !techFields.includes(f.name) && f.name !== "IndicadorID" && !(key === "CFG_Actividad" && f.name === "Nombre"))
+    f.name === "OBJECTID" || (!f.name.includes("GlobalID") && !f.name.includes("Guid") && !techFields.includes(f.name) && (f.name !== "IndicadorID" || key === "PLAN_Actividad") && !(key === "CFG_Actividad" && f.name === "Nombre"))
   );
 
   if (key === "SEG_Asignacion") {
@@ -540,7 +553,7 @@ function renderTable() {
 
   const ths = fields.map(f => {
     let c = ""; if(currentSort.col === f.name) c = currentSort.dir === 1 ? "sort-asc" : "sort-desc";
-    return `<th class="${f.name.includes('_Virtual')?'':'sortable'} ${c}" ${f.name.includes('_Virtual')?'':'onclick="toggleSort(\''+f.name+'\')"'}>${f.alias}</th>`;
+    return `<th class="${f.name.includes('_Virtual')?'':'sortable'} ${c}" ${f.name.includes('_Virtual')?'':'onclick="toggleSort(\''+f.name+'\')"'}>${getDisplayAlias(f)}</th>`;
   }).join("");
   document.getElementById("tbl-head").innerHTML = `<tr><th style="width:200px;">Acciones</th>${ths}</tr>`;
 
@@ -663,7 +676,7 @@ function openModalForm(oid = null, isDuplicate = false) {
   document.getElementById("btn-save").style.display = hasWritePermission(key) ? "inline-flex" : "none";
   
   let html = "", hiddenHtml = "";
-  const techFields = ["OBJECTID", "CreationDate", "Creator", "EditDate", "Editor", "PersonaUltimaEdicionID", "FechaUltimaEdicionFuncional", "PersonaID", "ClaveUnicaAsignacion", "PersonaRolID", "AlcanceID"];
+  const techFields = ["OBJECTID", "CreationDate", "Creator", "EditDate", "Editor", "PersonaUltimaEdicionID", "FechaUltimaEdicionFuncional", "PersonaID", "ClaveUnicaAsignacion", "PersonaRolID", "AlcanceID", "ClaveUnicaPlanActividad"];
   const parentTextF = PARENT_RULES[key]?.parentText;
   const largeTextFields = ["Definicion", "ObservacionesPlaneacion", "TextoNarrativo", "PrincipalesLogros", "DescripcionLogrosAlcanzados", "Observaciones", "DescripcionSitio"];
 
@@ -688,10 +701,17 @@ function openModalForm(oid = null, isDuplicate = false) {
 
   sortedFields.forEach(f => {
     if(techFields.includes(f.name) && !(key === "SEG_PersonaRol" && f.name === "PersonaID")) return;
+    
+    // Ocultar campo si es requerido pero no funcional en vista
+    if(key === "CFG_Tarea" && f.name === "FrecuenciaReporte") {
+        hiddenHtml += `<input type="hidden" data-field="${f.name}" data-type="${f.type}" id="hidden-${f.name}" value="${esc(editingRow ? editingRow.attributes[f.name] : '')}" />`;
+        return;
+    }
 
     const val = editingRow ? editingRow.attributes[f.name] : (f.name === "Vigencia" ? document.getElementById("sel-vigencia").value : "");
     const dom = metaCache[key].domainsByField[f.name];
     const isFK = FK_MAPPING[f.name];
+    const displayAlias = getDisplayAlias(f);
     
     if(
         f.name === parentTextF || 
@@ -725,9 +745,9 @@ function openModalForm(oid = null, isDuplicate = false) {
                 }
                 let opts = catalogs["SEG_Persona"].map(c => `<option value="${esc(c.GlobalID)}" ${currentFkVal===c.GlobalID?'selected':''}>${esc(buildEntityLabel("SEG_Persona", c))}</option>`).join("");
                 html += `<div class="field" id="field-wrap-${f.name}">
-                            <label>${f.alias} <span style="color:#d64545">*</span></label>
+                            <label>${displayAlias} <span style="color:#d64545">*</span></label>
                             <select data-field="${f.name}" data-type="${f.type}" id="sel-${f.name}">
-                                <option value="">- Seleccione ${f.alias.replace(' ID','')} - ${oldNameHint}</option>
+                                <option value="">- Seleccione ${displayAlias.replace(' ID','')} - ${oldNameHint}</option>
                                 ${opts}
                             </select>
                             ${oldNameHint ? `<span class="help-text" style="color:#d64545;">Debe reasignar una persona válida.</span>` : ''}
@@ -765,7 +785,7 @@ function openModalForm(oid = null, isDuplicate = false) {
         }).join("");
         
         html += `<div class="field" id="field-wrap-${f.name}">
-                    <label>${f.alias} <span style="color:#d64545">*</span></label>
+                    <label>${displayAlias} <span style="color:#d64545">*</span></label>
                     <select data-field="${f.name}" data-type="${f.type}" id="sel-${f.name}">
                         <option value="">- Seleccione Rol -</option>
                         ${opts}
@@ -783,7 +803,7 @@ function openModalForm(oid = null, isDuplicate = false) {
 
     if (key === "SEG_Alcance" && f.name === "NivelJerarquia") {
         let opts = dom.map(d => `<option value="${esc(d.code)}" ${val===d.code?'selected':''}>${esc(d.name)}</option>`).join("");
-        html += `<div class="field" id="field-wrap-${f.name}"><label>${f.alias}</label><select data-field="${f.name}" data-type="${f.type}">${opts}</select></div>`;
+        html += `<div class="field" id="field-wrap-${f.name}"><label>${displayAlias}</label><select data-field="${f.name}" data-type="${f.type}">${opts}</select></div>`;
         html += `<div class="field"><label>Objeto de Alcance <span style="color:#d64545">*</span></label><select id="sel-alcance-objeto"><option value="">- Seleccione Nivel Primero -</option></select></div>`;
         return;
     }
@@ -798,14 +818,14 @@ function openModalForm(oid = null, isDuplicate = false) {
                 const isSel = (String(val) === String(optVal)) ? 'selected' : '';
                 return `<option value="${esc(optVal)}" ${isSel}>${esc(buildEntityLabel(lookupKey, c))}</option>`;
             }).join("");
-            html += `<div class="field" id="field-wrap-${f.name}"><label>${f.alias}</label><select data-field="${f.name}" data-type="${f.type}" data-parent="1"><option value="">- Selecciona -</option>${opts}</select></div>`;
+            html += `<div class="field" id="field-wrap-${f.name}"><label>${displayAlias}</label><select data-field="${f.name}" data-type="${f.type}" data-parent="1"><option value="">- Selecciona -</option>${opts}</select></div>`;
         }
         return; 
     }
     
     if(dom) {
       let opts = dom.map(d => `<option value="${esc(d.code)}" ${val===d.code?'selected':''}>${esc(d.name)}</option>`).join("");
-      html += `<div class="field" id="field-wrap-${f.name}"><label>${f.alias}</label><select data-field="${f.name}" data-type="${f.type}"><option value="">- Selecciona -</option>${opts}</select></div>`;
+      html += `<div class="field" id="field-wrap-${f.name}"><label>${displayAlias}</label><select data-field="${f.name}" data-type="${f.type}"><option value="">- Selecciona -</option>${opts}</select></div>`;
     } 
     else {
       const isWeight = PARENT_RULES[key]?.weight === f.name;
@@ -819,10 +839,10 @@ function openModalForm(oid = null, isDuplicate = false) {
       }
 
       if (largeTextFields.includes(f.name)) {
-          html += `<div class="field" id="field-wrap-${f.name}"><label>${f.alias}</label><textarea data-field="${f.name}" data-type="${f.type}" rows="4" spellcheck="true" lang="es">${esc(val)}</textarea></div>`;
+          html += `<div class="field" id="field-wrap-${f.name}"><label>${displayAlias}</label><textarea data-field="${f.name}" data-type="${f.type}" rows="4" spellcheck="true" lang="es">${esc(val)}</textarea></div>`;
       } else {
           const spellAttr = type === "text" ? 'spellcheck="true" lang="es"' : '';
-          html += `<div class="field" id="field-wrap-${f.name}"><label>${f.alias}</label>
+          html += `<div class="field" id="field-wrap-${f.name}"><label>${displayAlias}</label>
             <input type="${type}" data-field="${f.name}" data-type="${f.type}" value="${esc(inputVal)}" ${isWeight?'step="0.01"':''} ${spellAttr} />
             ${isWeight ? `<span class="weight-helper" style="font-size:11px; font-weight:bold; margin-top:4px;"></span>` : ''}
           </div>`;
@@ -848,8 +868,43 @@ function openModalForm(oid = null, isDuplicate = false) {
             }
         });
     }
-    formDyn.querySelectorAll(`input[data-field="${PARENT_RULES[key].weight}"]`).forEach(i => i.addEventListener("input", () => checkWeight(key)));
+    const wInp = formDyn.querySelector(`input[data-field="${PARENT_RULES[key].weight}"]`);
+    if(wInp) wInp.addEventListener("input", () => checkWeight(key));
     checkWeight(key);
+  }
+
+  // Regla Aplica = "No" en tablas PLAN_*
+  if (key.startsWith("PLAN_")) {
+      const elAplica = formDyn.querySelector('[data-field="Aplica"]');
+      if (elAplica) {
+          const toggleAplica = () => {
+              const isNo = (elAplica.value || "").toUpperCase() === "NO";
+              let weightField = PARENT_RULES[key]?.weight;
+              if (weightField) {
+                  const elWeight = formDyn.querySelector(`[data-field="${weightField}"]`);
+                  if (elWeight) {
+                      elWeight.disabled = isNo;
+                      if (isNo) elWeight.value = 0;
+                  }
+              }
+              
+              let warningEl = document.getElementById("aplica-warning");
+              if (isNo) {
+                  if (!warningEl) {
+                      const w = document.createElement("div");
+                      w.id = "aplica-warning";
+                      w.style = "grid-column: 1 / -1; background: #fff3cd; color: #856404; padding: 10px; border-radius: 6px; font-size: 13px; font-weight: bold; margin-bottom: 10px;";
+                      w.textContent = "⚠️ No aplica en esta vigencia. (No se sumará al peso total y el peso asociado será 0).";
+                      formDyn.prepend(w);
+                  }
+              } else {
+                  if (warningEl) warningEl.remove();
+              }
+              if(PARENT_RULES[key]) checkWeight(key);
+          };
+          elAplica.addEventListener("change", toggleAplica);
+          setTimeout(toggleAplica, 50); // Init
+      }
   }
 
   if (key === "SEG_Asignacion") {
@@ -927,7 +982,7 @@ formDyn.addEventListener("input", (e) => {
 
 async function checkWeight(key) {
   const rule = PARENT_RULES[key]; 
-  if(!rule) return;
+  if(!rule || !rule.weight) return;
   const helper = formDyn.querySelector(".weight-helper"), pSel = formDyn.querySelector(`select[data-field="${rule.fk}"]`), wInp = formDyn.querySelector(`input[data-field="${rule.weight}"]`);
   if(!helper || !pSel || !wInp) return;
   
@@ -940,11 +995,24 @@ async function checkWeight(key) {
   if (!key.startsWith("CFG_") && v && metaCache[key].fieldsByName["Vigencia"]) w += ` AND Vigencia=${v}`;
   
   try {
-    const r = await fetchJson(`${entityUrl(key)}/query`, { f: "json", where: w, outFields: `OBJECTID,${rule.weight}`, returnGeometry: false });
+    const r = await fetchJson(`${entityUrl(key)}/query`, { f: "json", where: w, outFields: `OBJECTID,${rule.weight},Aplica`, returnGeometry: false });
     let sum = 0; const myOid = (editingRow && !window.isDuplicating) ? editingRow.attributes.OBJECTID : null;
-    (r.features || []).forEach(f => { if(f.attributes.OBJECTID !== myOid) sum += (f.attributes[rule.weight] || 0); });
+    (r.features || []).forEach(f => { 
+        if(f.attributes.OBJECTID !== myOid) {
+            const aplica = f.attributes.Aplica;
+            if (!aplica || String(aplica).toUpperCase() !== "NO") {
+                sum += (f.attributes[rule.weight] || 0); 
+            }
+        }
+    });
     
-    const current = Number(wInp.value) || 0; const total = sum + current;
+    let current = 0;
+    const elAplica = formDyn.querySelector('[data-field="Aplica"]');
+    if (!elAplica || (elAplica.value || "").toUpperCase() !== "NO") {
+        current = Number(wInp.value) || 0;
+    }
+    
+    const total = sum + current;
     helper.textContent = `Ocupado: ${sum.toFixed(2)}% | Total con este: ${total.toFixed(2)}%`;
     helper.style.color = total > 100 ? "#d64545" : "#15803d";
     wInp.setAttribute("data-invalid", total > 100.001 ? "1" : "0");
@@ -961,8 +1029,12 @@ async function save() {
   const isDuplicate = window.isDuplicating;
   const originalAttrs = editingRow ? editingRow.attributes : null;
 
-  if(isUpdate) attrs.OBJECTID = originalAttrs.OBJECTID;
-  else attrs.GlobalID = generateGUID(); 
+  if (isUpdate) {
+      attrs.OBJECTID = originalAttrs.OBJECTID;
+      attrs.GlobalID = originalAttrs.GlobalID;
+  } else {
+      attrs.GlobalID = generateGUID(); 
+  }
   
   if(metaCache[key].fieldsByName["PersonaUltimaEdicionID"]) attrs.PersonaUltimaEdicionID = SESSION.personaID;
 
@@ -986,10 +1058,24 @@ async function save() {
       throw new Error("Validation Error");
   }
 
+  // Lógica Aplica="No" para tablas PLAN_*
+  if (key.startsWith("PLAN_") && attrs["Aplica"]) {
+      if (String(attrs["Aplica"]).toUpperCase() === "NO") {
+          const weightField = PARENT_RULES[key]?.weight;
+          if (weightField && attrs[weightField] !== undefined) {
+              attrs[weightField] = 0;
+          }
+      }
+  }
+
   if(key === "CFG_Actividad") attrs["Nombre"] = attrs["NombreActividad"];
 
   if (key === "SEG_Persona") {
       attrs["DependenciaCodigo"] = attrs["Dependencia"];
+      attrs["PersonaID"] = isUpdate ? (originalAttrs.PersonaID || originalAttrs.GlobalID || attrs.GlobalID) : attrs.GlobalID;
+  }
+  if (key === "SEG_PersonaRol") {
+      attrs["PersonaRolID"] = isUpdate ? (originalAttrs.PersonaRolID || originalAttrs.GlobalID || attrs.GlobalID) : attrs.GlobalID;
   }
   if (key === "SEG_Asignacion") {
       const vig = attrs["Vigencia"] || document.getElementById("sel-vigencia").value;
@@ -998,6 +1084,14 @@ async function save() {
           throw new Error("Validation Error");
       }
       attrs["ClaveUnicaAsignacion"] = `${attrs["PersonaGlobalID"]}|${attrs["TareaGlobalID"]}|${vig}`;
+  }
+  if (key === "PLAN_Actividad") {
+      const vig = attrs["Vigencia"] || document.getElementById("sel-vigencia").value;
+      if (!attrs["ActividadGlobalID"] || !vig || !attrs["IndicadorID"]) {
+          showFormError("Debe seleccionar Actividad, Vigencia e Indicador.");
+          throw new Error("Validation Error");
+      }
+      attrs["ClaveUnicaPlanActividad"] = `${attrs["ActividadGlobalID"]}|${vig}|${attrs["IndicadorID"]}`;
   }
   if (key === "SEG_Alcance") {
       const nivel = attrs["NivelJerarquia"];
@@ -1015,6 +1109,7 @@ async function save() {
           const idField = catKey.replace("CFG_", "") + "ID";
           attrs["ObjetoID"] = objItem[idField] || objItem.CodigoTarea || objItem.CodigoSubActividad || String(objItem.OBJECTID);
       }
+      attrs["AlcanceID"] = isUpdate ? (originalAttrs.AlcanceID || originalAttrs.GlobalID || attrs.GlobalID) : attrs.GlobalID;
   }
 
   if (PERSON_FIELDS_CONFIG[key]) {
@@ -1088,6 +1183,7 @@ async function save() {
           
           let errMsg = `Ya existe un registro con este identificador.`;
           if (key === "SEG_Asignacion") errMsg = "Ya existe una asignación para esta persona, tarea y vigencia.";
+          else if (key === "PLAN_Actividad") errMsg = "Ya existe un registro para esta combinación de Actividad, Vigencia e Indicador.";
           else if (!key.startsWith("CFG_") && attrs.Vigencia) errMsg = `Ya existe un registro con este identificador para la vigencia ${attrs.Vigencia}.`;
           
           showFormError(errMsg);
@@ -1208,15 +1304,16 @@ if (btnExecClone) {
         setStatus(`Iniciando clonación de ${origen} a ${destino}...`, "info");
         
         try {
+            const resAct = await processClone("PLAN_Actividad", origen, destino, "ActividadGlobalID", pacGid);
             const resSub = await processClone("PLAN_SubActividadVigencia", origen, destino, "SubActividadGlobalID", pacGid);
             const resTar = await processClone("PLAN_TareaVigencia", origen, destino, "TareaGlobalID", pacGid);
             
-            const msg = `Clonación finalizada:\n\n- PLAN_SubActividadVigencia: ${resSub.created} creados, ${resSub.skipped} omitidos, ${resSub.errors} errores\n- PLAN_TareaVigencia: ${resTar.created} creados, ${resTar.skipped} omitidos, ${resTar.errors} errores`;
+            const msg = `Clonación finalizada:\n\n- PLAN_Actividad: ${resAct.created} creados, ${resAct.skipped} omitidos, ${resAct.errors} errores\n- PLAN_SubActividadVigencia: ${resSub.created} creados, ${resSub.skipped} omitidos, ${resSub.errors} errores\n- PLAN_TareaVigencia: ${resTar.created} creados, ${resTar.skipped} omitidos, ${resTar.errors} errores`;
             
             alert(msg);
             setStatus("Clonación completada.", "success");
             
-            await writeAuditEvent("CLONE_VIGENCIA", "PLAN_SubActividadVigencia / PLAN_TareaVigencia", "", "OK", `Clonación de ${origen} hacia ${destino}. SubActividades: ${resSub.created}. Tareas: ${resTar.created}.`);
+            await writeAuditEvent("CLONE_VIGENCIA", "PLAN_*", "", "OK", `Clonación de ${origen} hacia ${destino}. Actividades: ${resAct.created}. SubActividades: ${resSub.created}. Tareas: ${resTar.created}.`);
             
             document.getElementById("modal-clone").classList.remove("is-open");
             if(currentEntityKey) await loadEntity(currentEntityKey, false);
@@ -1242,20 +1339,35 @@ async function processClone(entityKey, origen, destino, fkField, pacGid) {
     }
     if(sourceRows.length === 0) return result;
     
-    const targetRes = await fetchJson(`${entityUrl(entityKey)}/query`, { f:"json", where:`Vigencia=${destino}`, outFields:fkField, returnGeometry:false });
+    // CORRECCIÓN PUNTO 2: Para PLAN_Actividad, se solicitan todos los campos necesarios al destino.
+    let targetOutFields = fkField;
+    if (entityKey === "PLAN_Actividad") {
+        targetOutFields = `${fkField},IndicadorID,ClaveUnicaPlanActividad`;
+    }
+
+    const targetRes = await fetchJson(`${entityUrl(entityKey)}/query`, { f:"json", where:`Vigencia=${destino}`, outFields:targetOutFields, returnGeometry:false });
     const targetRows = targetRes.features || [];
     const existingFks = new Set(targetRows.map(r => r.attributes[fkField]));
+    
+    // Para PLAN_Actividad la unicidad es la clave compuesta o campo nativo:
+    const existingKeys = new Set(targetRows.map(r => r.attributes.ClaveUnicaPlanActividad || `${r.attributes[fkField]}|${destino}|${r.attributes.IndicadorID}`));
     
     const adds = [];
     for(let row of sourceRows) {
         const attrs = row.attributes;
         const fkVal = attrs[fkField];
-        if(existingFks.has(fkVal)) { result.skipped++; continue; }
+        
+        if (entityKey !== "PLAN_Actividad" && existingFks.has(fkVal)) { result.skipped++; continue; }
+        if (entityKey === "PLAN_Actividad" && existingKeys.has(`${fkVal}|${destino}|${attrs.IndicadorID}`)) { result.skipped++; continue; }
         
         const newAttrs = { ...attrs };
         delete newAttrs.OBJECTID;
         newAttrs.GlobalID = generateGUID();
         newAttrs.Vigencia = Number(destino);
+        
+        if (entityKey === "PLAN_Actividad" && newAttrs.IndicadorID) {
+            newAttrs.ClaveUnicaPlanActividad = `${newAttrs.ActividadGlobalID}|${destino}|${newAttrs.IndicadorID}`;
+        }
         
         delete newAttrs.CreationDate; delete newAttrs.Creator; delete newAttrs.EditDate; delete newAttrs.Editor;
         if(newAttrs.PersonaUltimaEdicionID !== undefined) newAttrs.PersonaUltimaEdicionID = SESSION.personaID;
